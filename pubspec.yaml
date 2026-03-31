@@ -1,0 +1,15 @@
+name: gestion_sport
+description: Outil d'administration du tournoi Ovalies — tirage au sort et génération des matchs.
+publish_to: 'none'
+version: 1.0.0+1
+
+environment:
+  sdk: '>=3.0.0 <4.0.0'
+
+dependencies:
+  flutter:
+    sdk: flutter
+  supabase_flutter: ^2.3.4
+
+flutter:
+  uses-material-design: true
