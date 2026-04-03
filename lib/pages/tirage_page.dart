@@ -3,7 +3,8 @@ import '../models/models.dart';
 import '../services/tournoi_service.dart';
 import 'widgets/tirage_tab.dart';
 import 'widgets/horaires_tab.dart';
-import 'widgets/generation_tab.dart';
+// ── MODIFIÉ : import du nouvel onglet IA ──
+import 'widgets/ia_generation_tab.dart';
 
 class TiragePage extends StatefulWidget {
   const TiragePage({super.key});
@@ -16,19 +17,16 @@ class _TiragePageState extends State<TiragePage> with TickerProviderStateMixin {
   final _service = TournoisService();
   late final TabController _tabController;
 
-  // Données
   List<Equipe> _toutesEquipes = [];
   bool _chargement = true;
   String? _erreur;
 
-  // Poules assignées : cat → poule → liste d'équipes
   final Map<String, Map<String, List<Equipe>>> _poulesParCat = {
     'R15M': {for (var p in poules) p: []},
     'R7M':  {for (var p in poules) p: []},
     'R7F':  {for (var p in poules) p: []},
   };
 
-  // Matchs générés (avec horaires éditables)
   List<MatchPoule> _matchsPoule = [];
   List<MatchArbre> _matchsArbre = [];
 
@@ -37,9 +35,11 @@ class _TiragePageState extends State<TiragePage> with TickerProviderStateMixin {
     super.initState();
     _tabController = TabController(length: 3, vsync: this);
     _tabController.addListener(() {
-      if (!_tabController.indexIsChanging) return; // ← AJOUT important
-      if (_tabController.index == 1 || _tabController.index == 2) {
-        WidgetsBinding.instance.addPostFrameCallback((_) { // ← AJOUT
+      if (!_tabController.indexIsChanging) return;
+      // ── MODIFIÉ : onglet 1 (Horaires) génère encore les matchs
+      // onglet 2 (IA) n'en a plus besoin, il fait tout lui-même
+      if (_tabController.index == 1) {
+        WidgetsBinding.instance.addPostFrameCallback((_) {
           _genererMatchs();
         });
       }
@@ -61,7 +61,6 @@ class _TiragePageState extends State<TiragePage> with TickerProviderStateMixin {
       setState(() {
         _toutesEquipes = equipes;
         _chargement = false;
-        // Pré-remplir les poules si déjà attribuées en DB
         for (final eq in equipes) {
           if (eq.poule != null && poules.contains(eq.poule)) {
             final pCat = _poulesParCat[eq.categorie];
@@ -92,7 +91,9 @@ class _TiragePageState extends State<TiragePage> with TickerProviderStateMixin {
         .expand((p) => _poulesParCat[cat]?[p] ?? [])
         .map((e) => e.id)
         .toSet();
-    return _toutesEquipes.where((e) => e.categorie == cat && !placees.contains(e.id)).toList();
+    return _toutesEquipes
+        .where((e) => e.categorie == cat && !placees.contains(e.id))
+        .toList();
   }
 
   void _ajouterAPoule(String cat, String poule, Equipe eq) {
@@ -107,7 +108,6 @@ class _TiragePageState extends State<TiragePage> with TickerProviderStateMixin {
   }
 
   void _tiragAuto(String cat) {
-    // Reset
     for (final p in poules) _poulesParCat[cat]![p]!.clear();
     final liste = List<Equipe>.from(_toutesEquipes.where((e) => e.categorie == cat));
     liste.shuffle();
@@ -131,9 +131,12 @@ class _TiragePageState extends State<TiragePage> with TickerProviderStateMixin {
       appBar: AppBar(
         title: const Row(
           children: [
-            Text('Ovalies', style: TextStyle(fontWeight: FontWeight.w900, fontSize: 20)),
+            Text('Ovalies',
+                style: TextStyle(fontWeight: FontWeight.w900, fontSize: 20)),
             SizedBox(width: 8),
-            Text('Admin — Tirage au sort', style: TextStyle(fontSize: 14, fontWeight: FontWeight.w400, color: Color(0xFFAED6B5))),
+            Text('Admin — Tirage au sort',
+                style: TextStyle(fontSize: 14, fontWeight: FontWeight.w400,
+                    color: Color(0xFFAED6B5))),
           ],
         ),
         actions: [
@@ -161,13 +164,26 @@ class _TiragePageState extends State<TiragePage> with TickerProviderStateMixin {
                   if (_nbEquipesNonPlacees() > 0)
                     Container(
                       padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 1),
-                      decoration: BoxDecoration(color: Colors.orange, borderRadius: BorderRadius.circular(8)),
-                      child: Text('$_nbEquipesNonPlacees()', style: const TextStyle(fontSize: 10)),
+                      decoration: BoxDecoration(
+                          color: Colors.orange,
+                          borderRadius: BorderRadius.circular(8)),
+                      child: Text('${_nbEquipesNonPlacees()}',
+                          style: const TextStyle(fontSize: 10)),
                     ),
                 ],
               ),
             ),
-            const Tab(text: '3 — Génération'),
+            // ── MODIFIÉ : onglet IA avec badge ──
+            const Tab(
+              child: Row(
+                mainAxisSize: MainAxisSize.min,
+                children: [
+                  Icon(Icons.auto_awesome, size: 14),
+                  SizedBox(width: 6),
+                  Text('3 — Génération IA'),
+                ],
+              ),
+            ),
           ],
         ),
       ),
@@ -193,13 +209,8 @@ class _TiragePageState extends State<TiragePage> with TickerProviderStateMixin {
             matchsArbre: _matchsArbre,
             onGenerer: _genererMatchs,
           ),
-          GenerationTab(
-            poulesParCat: _poulesParCat,
-            matchsPoule: _matchsPoule,
-            matchsArbre: _matchsArbre,
-            service: _service,
-            onGenerer: _genererMatchs,
-          ),
+          // ── MODIFIÉ : IaGenerationTab remplace GenerationTab ──
+          const IaGenerationTab(),
         ],
       ),
     );
@@ -216,11 +227,17 @@ class _TiragePageState extends State<TiragePage> with TickerProviderStateMixin {
         children: [
           const Icon(Icons.wifi_off_rounded, size: 48, color: Color(0xFFE57373)),
           const SizedBox(height: 16),
-          const Text('Impossible de se connecter à Supabase', style: TextStyle(fontSize: 16, fontWeight: FontWeight.w600)),
+          const Text('Impossible de se connecter à Supabase',
+              style: TextStyle(fontSize: 16, fontWeight: FontWeight.w600)),
           const SizedBox(height: 8),
-          Text(_erreur ?? '', style: const TextStyle(fontSize: 12, color: Colors.grey), textAlign: TextAlign.center),
+          Text(_erreur ?? '',
+              style: const TextStyle(fontSize: 12, color: Colors.grey),
+              textAlign: TextAlign.center),
           const SizedBox(height: 24),
-          ElevatedButton.icon(onPressed: _charger, icon: const Icon(Icons.refresh), label: const Text('Réessayer')),
+          ElevatedButton.icon(
+              onPressed: _charger,
+              icon: const Icon(Icons.refresh),
+              label: const Text('Réessayer')),
         ],
       ),
     );

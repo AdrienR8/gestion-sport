@@ -181,9 +181,7 @@ class HomePage extends StatelessWidget {
               badgeCouleur: const Color(0xFF2D9148),
               points: const [
                 'Tirage au sort par catégorie',
-                'Drag & drop des équipes',
-                'Génération automatique des matchs',
-                'Saisie des horaires et terrains',
+                'Saisie des horaires, terrains, arbitres',
               ],
               onTap: () => Navigator.push(
                 context,
@@ -199,10 +197,8 @@ class HomePage extends StatelessWidget {
               badge: 'Bientôt',
               badgeCouleur: const Color(0xFF5B8FCC),
               points: const [
-                'Barre de recherche par nom',
                 'Historique des cartons jaunes/rouges',
                 'Statut de suspension',
-                'Fiche individuelle du joueur',
               ],
               onTap: () => Navigator.push(
                 context,
@@ -220,8 +216,6 @@ class HomePage extends StatelessWidget {
               points: const [
                 'Stats par équipe (essais, cartons)',
                 'Classement dans la poule',
-                'Goal average et points',
-                'Composition de l\'équipe',
               ],
               onTap: null, // À implémenter
             ),
