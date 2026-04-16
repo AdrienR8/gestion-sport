@@ -1,6 +1,7 @@
 import 'package:flutter/material.dart';
 import 'tirage_page.dart';
 import 'joueurs_page.dart';
+import 'equipes_page.dart';
 
 class HomePage extends StatelessWidget {
   const HomePage({super.key});
@@ -211,13 +212,16 @@ class HomePage extends StatelessWidget {
               sousTitre: 'Statistiques, classements et performances par équipe',
               couleur: const Color(0xFF6B1A5C),
               couleurFond: const Color(0xFFF5E8F5),
-              badge: 'Bientôt',
-              badgeCouleur: const Color(0xFFB05CA0),
+              badge: 'Disponible',                         // ← était 'Bientôt'
+              badgeCouleur: const Color(0xFF2D9148),       // ← était Color(0xFFB05CA0)
               points: const [
-                'Stats par équipe (essais, cartons)',
-                'Classement dans la poule',
+                'Tri par catégorie',
+                'Stats : essais, cartons, victoires',
               ],
-              onTap: null, // À implémenter
+              onTap: () => Navigator.push(                // ← était null
+                context,
+                MaterialPageRoute(builder: (_) => const EquipesPage()),
+              ),
             ),
           ],
         );

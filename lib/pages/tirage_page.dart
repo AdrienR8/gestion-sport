@@ -1,10 +1,21 @@
+// lib/pages/tirage_page.dart
+//
+// MODIFICATIONS APPORTÉES :
+//   • Suppression de l'import de horaires_tab.dart
+//   • Suppression de l'import de generation_tab.dart
+//   • Ajout de l'import de suivi_matchs_page.dart
+//   • TabController réduit de 3 → 2 onglets (Tirage + Suivi matchs)
+//   • Suppression du déclenchement automatique _genererMatchs() sur tab 1 & 2
+//     (la génération n'est plus dans ce flux)
+//   • Suppression des listes _matchsPoule et _matchsArbre (plus gérées ici)
+//   • Le titre de l'onglet 2 est "Suivi matchs" au lieu de "Horaires"
+//   • La méthode _genererMatchs() est supprimée
+
 import 'package:flutter/material.dart';
 import '../models/models.dart';
 import '../services/tournoi_service.dart';
 import 'widgets/tirage_tab.dart';
-import 'widgets/horaires_tab.dart';
-// ── MODIFIÉ : import du nouvel onglet IA ──
-import 'widgets/ia_generation_tab.dart';
+import 'suivi_matchs_page.dart'; // ← NOUVEAU (remplace horaires_tab + generation_tab)
 
 class TiragePage extends StatefulWidget {
   const TiragePage({super.key});
@@ -17,32 +28,25 @@ class _TiragePageState extends State<TiragePage> with TickerProviderStateMixin {
   final _service = TournoisService();
   late final TabController _tabController;
 
+  // Données
   List<Equipe> _toutesEquipes = [];
   bool _chargement = true;
   String? _erreur;
 
+  // Poules assignées : cat → poule → liste d'équipes
   final Map<String, Map<String, List<Equipe>>> _poulesParCat = {
     'R15M': {for (var p in poules) p: []},
     'R7M':  {for (var p in poules) p: []},
     'R7F':  {for (var p in poules) p: []},
   };
 
-  List<MatchPoule> _matchsPoule = [];
-  List<MatchArbre> _matchsArbre = [];
-
   @override
   void initState() {
     super.initState();
-    _tabController = TabController(length: 3, vsync: this);
+    // ─ MODIFIÉ : 2 onglets au lieu de 3 ──────────────────────────────────
+    _tabController = TabController(length: 2, vsync: this);
     _tabController.addListener(() {
       if (!_tabController.indexIsChanging) return;
-      // ── MODIFIÉ : onglet 1 (Horaires) génère encore les matchs
-      // onglet 2 (IA) n'en a plus besoin, il fait tout lui-même
-      if (_tabController.index == 1) {
-        WidgetsBinding.instance.addPostFrameCallback((_) {
-          _genererMatchs();
-        });
-      }
       setState(() {});
     });
     _charger();
@@ -61,6 +65,7 @@ class _TiragePageState extends State<TiragePage> with TickerProviderStateMixin {
       setState(() {
         _toutesEquipes = equipes;
         _chargement = false;
+        // Pré-remplir les poules si déjà attribuées en DB
         for (final eq in equipes) {
           if (eq.poule != null && poules.contains(eq.poule)) {
             final pCat = _poulesParCat[eq.categorie];
@@ -79,22 +84,16 @@ class _TiragePageState extends State<TiragePage> with TickerProviderStateMixin {
     }
   }
 
-  void _genererMatchs() {
-    setState(() {
-      _matchsPoule = _service.genererMatchsPoule(_poulesParCat);
-      _matchsArbre = _service.genererMatchsArbre();
-    });
-  }
-
   List<Equipe> _equipesNonPlacees(String cat) {
     final placees = poules
         .expand((p) => _poulesParCat[cat]?[p] ?? [])
         .map((e) => e.id)
         .toSet();
-    return _toutesEquipes
-        .where((e) => e.categorie == cat && !placees.contains(e.id))
-        .toList();
+    return _toutesEquipes.where((e) => e.categorie == cat && !placees.contains(e.id)).toList();
   }
+
+  int _nbEquipesNonPlacees() =>
+      _categories.fold(0, (sum, cat) => sum + _equipesNonPlacees(cat).length);
 
   void _ajouterAPoule(String cat, String poule, Equipe eq) {
     final list = _poulesParCat[cat]![poule]!;
@@ -125,18 +124,21 @@ class _TiragePageState extends State<TiragePage> with TickerProviderStateMixin {
     setState(() {});
   }
 
+  // ── Constantes catégories (conservées pour tirage_tab) ────────────────────
+  static const List<String> _categories = ['R15M', 'R7M', 'R7F'];
+
   @override
   Widget build(BuildContext context) {
     return Scaffold(
       appBar: AppBar(
+        backgroundColor: const Color(0xFF1A5C2A),
+        foregroundColor: Colors.white,
         title: const Row(
           children: [
-            Text('Ovalies',
-                style: TextStyle(fontWeight: FontWeight.w900, fontSize: 20)),
+            Text('Ovalies', style: TextStyle(fontWeight: FontWeight.w900, fontSize: 20)),
             SizedBox(width: 8),
             Text('Admin — Tirage au sort',
-                style: TextStyle(fontSize: 14, fontWeight: FontWeight.w400,
-                    color: Color(0xFFAED6B5))),
+                style: TextStyle(fontSize: 14, fontWeight: FontWeight.w400, color: Color(0xFFAED6B5))),
           ],
         ),
         actions: [
@@ -147,6 +149,7 @@ class _TiragePageState extends State<TiragePage> with TickerProviderStateMixin {
           ),
           const SizedBox(width: 8),
         ],
+        // ─ MODIFIÉ : 2 onglets ─────────────────────────────────────────────
         bottom: TabBar(
           controller: _tabController,
           labelColor: Colors.white,
@@ -159,28 +162,19 @@ class _TiragePageState extends State<TiragePage> with TickerProviderStateMixin {
               child: Row(
                 mainAxisSize: MainAxisSize.min,
                 children: [
-                  const Text('2 — Horaires'),
+                  const Text('2 — Suivi matchs'),
                   const SizedBox(width: 6),
+                  // Badge si équipes non placées
                   if (_nbEquipesNonPlacees() > 0)
                     Container(
                       padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 1),
                       decoration: BoxDecoration(
-                          color: Colors.orange,
-                          borderRadius: BorderRadius.circular(8)),
-                      child: Text('${_nbEquipesNonPlacees()}',
-                          style: const TextStyle(fontSize: 10)),
+                          color: Colors.orange, borderRadius: BorderRadius.circular(8)),
+                      child: Text(
+                        '${_nbEquipesNonPlacees()}',
+                        style: const TextStyle(fontSize: 10, color: Colors.white),
+                      ),
                     ),
-                ],
-              ),
-            ),
-            // ── MODIFIÉ : onglet IA avec badge ──
-            const Tab(
-              child: Row(
-                mainAxisSize: MainAxisSize.min,
-                children: [
-                  Icon(Icons.auto_awesome, size: 14),
-                  SizedBox(width: 6),
-                  Text('3 — Génération IA'),
                 ],
               ),
             ),
@@ -190,54 +184,34 @@ class _TiragePageState extends State<TiragePage> with TickerProviderStateMixin {
       body: _chargement
           ? const Center(child: CircularProgressIndicator(color: Color(0xFF1A5C2A)))
           : _erreur != null
-          ? _buildErreur()
+          ? Center(
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            const Icon(Icons.wifi_off, size: 48, color: Color(0xFFE57373)),
+            const SizedBox(height: 16),
+            Text(_erreur!, textAlign: TextAlign.center,
+                style: const TextStyle(color: Colors.grey)),
+            const SizedBox(height: 16),
+            TextButton(onPressed: _charger, child: const Text('Réessayer')),
+          ],
+        ),
+      )
           : TabBarView(
         controller: _tabController,
-        physics: const NeverScrollableScrollPhysics(),
         children: [
+          // ─ Onglet 1 : Tirage (inchangé) ──────────────────────
           TirageTab(
             toutesEquipes: _toutesEquipes,
             poulesParCat: _poulesParCat,
-            equipesNonPlacees: _equipesNonPlacees,
             onAjouter: _ajouterAPoule,
             onRetirer: _retirerDePoule,
             onTirageAuto: _tiragAuto,
             onReset: _resetTirage,
+            equipesNonPlacees: _equipesNonPlacees,
           ),
-          HorairesTab(
-            matchsPoule: _matchsPoule,
-            matchsArbre: _matchsArbre,
-            onGenerer: _genererMatchs,
-          ),
-          // ── MODIFIÉ : IaGenerationTab remplace GenerationTab ──
-          const IaGenerationTab(),
-        ],
-      ),
-    );
-  }
-
-  int _nbEquipesNonPlacees() {
-    return categories.fold(0, (s, c) => s + _equipesNonPlacees(c).length);
-  }
-
-  Widget _buildErreur() {
-    return Center(
-      child: Column(
-        mainAxisSize: MainAxisSize.min,
-        children: [
-          const Icon(Icons.wifi_off_rounded, size: 48, color: Color(0xFFE57373)),
-          const SizedBox(height: 16),
-          const Text('Impossible de se connecter à Supabase',
-              style: TextStyle(fontSize: 16, fontWeight: FontWeight.w600)),
-          const SizedBox(height: 8),
-          Text(_erreur ?? '',
-              style: const TextStyle(fontSize: 12, color: Colors.grey),
-              textAlign: TextAlign.center),
-          const SizedBox(height: 24),
-          ElevatedButton.icon(
-              onPressed: _charger,
-              icon: const Icon(Icons.refresh),
-              label: const Text('Réessayer')),
+          // ─ Onglet 2 : Suivi matchs (NOUVEAU — remplace Horaires + Génération) ─
+          const SuiviMatchsPage(standaloneMode: false),
         ],
       ),
     );
