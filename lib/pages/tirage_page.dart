@@ -38,6 +38,7 @@ class _TiragePageState extends State<TiragePage> with TickerProviderStateMixin {
     'R15M': {for (var p in poules) p: []},
     'R7M':  {for (var p in poules) p: []},
     'R7F':  {for (var p in poules) p: []},
+    'RF':   {'A': [], 'B': [], 'C': [], 'D': []},
   };
 
   @override
@@ -85,7 +86,8 @@ class _TiragePageState extends State<TiragePage> with TickerProviderStateMixin {
   }
 
   List<Equipe> _equipesNonPlacees(String cat) {
-    final placees = poules
+    final poulesDesCat = cat == 'RF' ? ['A', 'B', 'C', 'D'] : poules;
+    final placees = poulesDesCat
         .expand((p) => _poulesParCat[cat]?[p] ?? [])
         .map((e) => e.id)
         .toSet();
@@ -107,11 +109,12 @@ class _TiragePageState extends State<TiragePage> with TickerProviderStateMixin {
   }
 
   void _tiragAuto(String cat) {
-    for (final p in poules) _poulesParCat[cat]![p]!.clear();
+    final poulesDesCat = cat == 'RF' ? ['A', 'B', 'C', 'D'] : poules;
+    for (final p in poulesDesCat) _poulesParCat[cat]![p]!.clear();
     final liste = List<Equipe>.from(_toutesEquipes.where((e) => e.categorie == cat));
     liste.shuffle();
     for (int i = 0; i < liste.length; i++) {
-      final p = poules[i % 6];
+      final p = poulesDesCat[i % poulesDesCat.length];
       if ((_poulesParCat[cat]![p]?.length ?? 0) < 4) {
         _poulesParCat[cat]![p]!.add(liste[i]);
       }
@@ -120,12 +123,13 @@ class _TiragePageState extends State<TiragePage> with TickerProviderStateMixin {
   }
 
   void _resetTirage(String cat) {
-    for (final p in poules) _poulesParCat[cat]![p]!.clear();
+    final poulesDesCat = cat == 'RF' ? ['A', 'B', 'C', 'D'] : poules;
+    for (final p in poulesDesCat) _poulesParCat[cat]![p]!.clear();
     setState(() {});
   }
 
   // ── Constantes catégories (conservées pour tirage_tab) ────────────────────
-  static const List<String> _categories = ['R15M', 'R7M', 'R7F'];
+  static const List<String> _categories = ['R15M', 'R7M', 'R7F', 'RF'];
 
   @override
   Widget build(BuildContext context) {

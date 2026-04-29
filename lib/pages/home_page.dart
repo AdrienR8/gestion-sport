@@ -2,6 +2,7 @@ import 'package:flutter/material.dart';
 import 'tirage_page.dart';
 import 'joueurs_page.dart';
 import 'equipes_page.dart';
+import 'Pompom_page.dart';
 
 class HomePage extends StatelessWidget {
   const HomePage({super.key});
@@ -221,6 +222,24 @@ class HomePage extends StatelessWidget {
               onTap: () => Navigator.push(                // ← était null
                 context,
                 MaterialPageRoute(builder: (_) => const EquipesPage()),
+              ),
+            ),
+            _ModuleCard(
+              icon: Icons.star_rounded,
+              titre: 'Gestion PomPom',
+              sousTitre: 'Finale, ordre de passage, podium et synchronisation des descriptions',
+              couleur: const Color(0xFFB5338A),
+              couleurFond: const Color(0xFFFAEFF7),
+              badge: 'Disponible',
+              badgeCouleur: const Color(0xFFB5338A),
+              points: const [
+                'Passer une équipe en finale',
+                'Définir l\'ordre de passage',
+                'Attribuer le podium (1ᵉʳ, 2ᵉ, 3ᵉ)',
+              ],
+              onTap: () => Navigator.push(
+                context,
+                MaterialPageRoute(builder: (_) => const PomPomPage()),
               ),
             ),
           ],

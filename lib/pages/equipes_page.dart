@@ -73,14 +73,13 @@ class _EquipesPageState extends State<EquipesPage> {
   String? _erreur;
   String _catFiltre = 'Tous';
 
-  static const _cats = ['Tous', 'R15M', 'R7M', 'R7F', 'RF', 'PP'];
+  static const _cats = ['Tous', 'R15M', 'R7M', 'R7F', 'RF', ];
 
   static const Map<String, Color> _catColors = {
     'R15M': Color(0xFF1A5C2A),
     'R7M':  Color(0xFF8B4513),
     'R7F':  Color(0xFF6B1A5C),
     'RF':   Color(0xFF1A4A7A),
-    'PP':   Color(0xFFB5338A),
   };
 
   static const Map<String, String> _catLabels = {
@@ -89,7 +88,6 @@ class _EquipesPageState extends State<EquipesPage> {
     'R7M':  'VII Masculin',
     'R7F':  'VII Féminin',
     'RF':   'Rugby Fauteuil',
-    'PP':   'Pompom',
   };
 
   @override

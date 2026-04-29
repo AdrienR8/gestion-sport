@@ -33,12 +33,14 @@ class _TirageTabState extends State<TirageTab> {
     'R15M': Color(0xFF1A5C2A),
     'R7M':  Color(0xFF8B4513),
     'R7F':  Color(0xFF6B1A5C),
+    'RF':   Color(0xFF1A4A7A),
   };
 
   static const Map<String, String> catLabels = {
     'R15M': 'Rugby XV Masculin',
     'R7M':  'Rugby VII Masculin',
     'R7F':  'Rugby VII Féminin',
+    'RF':   'Rugby Fauteuil',
   };
 
   @override
@@ -407,7 +409,10 @@ class _StatutBar extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final total = toutesEquipes.where((e) => e.categorie == cat).length;
-    final placees = poules.fold<int>(0, (s, p) => s + (poulesParCat[cat]?[p]?.length ?? 0));
+    final poulesDesCat = cat == 'RF'
+        ? ['A', 'B', 'C', 'D']
+        : poules;
+    final placees = poulesDesCat.fold<int>(0, (s, p) => s + (poulesParCat[cat]?[p]?.length ?? 0));
     final ok = placees == total && total > 0;
 
     return Container(
