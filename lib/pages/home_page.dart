@@ -3,6 +3,7 @@ import 'tirage_page.dart';
 import 'joueurs_page.dart';
 import 'equipes_page.dart';
 import 'Pompom_page.dart';
+import 'suivi_matchs_fauteuil_page.dart';
 
 class HomePage extends StatelessWidget {
   const HomePage({super.key});
@@ -235,13 +236,32 @@ class HomePage extends StatelessWidget {
               points: const [
                 'Passer une équipe en finale',
                 'Définir l\'ordre de passage',
-                'Attribuer le podium (1ᵉʳ, 2ᵉ, 3ᵉ)',
               ],
               onTap: () => Navigator.push(
                 context,
                 MaterialPageRoute(builder: (_) => const PomPomPage()),
               ),
             ),
+
+            _ModuleCard(
+              icon: Icons.accessible_rounded,
+              titre: 'Rugby en Fauteuil',
+              sousTitre: 'Suivi des matchs et arbre de compétition — catégorie RF',
+              couleur: const Color(0xFF1A4A7A),   // même bleu que dans _catColors['RF']
+              couleurFond: const Color(0xFFE8F0FB),
+              badge: 'Disponible',
+              badgeCouleur: const Color(0xFF1A4A7A),
+              points: const [
+                'Liste des matchs éditables',
+                'Arbre de compétition RF',
+
+              ],
+              onTap: () => Navigator.push(
+                context,
+                MaterialPageRoute(builder: (_) => const SuiviMatchsFauteilPage()),
+              ),
+            ),
+
           ],
         );
       },
