@@ -197,8 +197,8 @@ class HomePage extends StatelessWidget {
               sousTitre: 'Recherche, cartons et suivi individuel de chaque joueur',
               couleur: const Color(0xFF1A4A7A),
               couleurFond: const Color(0xFFE8F0FB),
-              badge: 'Bientôt',
-              badgeCouleur: const Color(0xFF5B8FCC),
+              badge: 'Disponible',
+              badgeCouleur: const Color(0xFF2D9148),
               points: const [
                 'Historique des cartons jaunes/rouges',
                 'Statut de suspension',

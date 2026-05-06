@@ -3,15 +3,19 @@
 // Vue 1 — Liste chronologique de tous les matchs de poule,
 // triée par poule, avec édition inline de l'horaire, du terrain et de l'arbitre.
 //
-// MODIFICATIONS APPORTÉES :
-//   • Nouveau fichier — remplace partiellement horaires_tab.dart
-//   • Données chargées depuis Supabase (tables PouleR15M, PouleR7M, PouleR7F)
-//   • Champ "Arbitre" sauvegardé via colonne "Arbitre" dans chaque table Poule*
-//   • Filtre par catégorie en haut de page
-//   • Dialog d'édition par match (horaire, terrain, arbitre)
+// MODIFICATIONS APPORTÉES (cette version) :
+//   • _MatchRow.onTap → redirige vers _ouvrirEdition OU _ouvrirFeuille
+//     selon que le match est terminé (Gagnant renseigné ≠ "0" ≠ null)
+//   • Match terminé  : onTap ouvre _ouvrirFeuille → dialog PDF (bucket "feuille de match")
+//     filtré sur match["id"] — aucune modification possible
+//   • Match non terminé : onTap ouvre _ouvrirEdition (comportement inchangé)
+//   • Icône de la ligne : 📄 si terminé, ✏️ si non terminé
+//   • Nouveau widget _FeuilleMatchDialog ajouté en bas de fichier
+//   • Rien d'autre n'a changé
 
 import 'package:flutter/material.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
+import 'package:url_launcher/url_launcher.dart';
 
 // ─── Constantes ──────────────────────────────────────────────────────────────
 const _categories = ['R15M', 'R7M', 'R7F'];
@@ -26,6 +30,12 @@ const Map<String, Color> _catFond = {
   'R7F':  Color(0xFFF5E8F5),
 };
 
+// ─── Helper : match terminé ? ─────────────────────────────────────────────────
+bool _estTermine(Map<String, dynamic> m) {
+  final g = m['Gagnant']?.toString() ?? '0';
+  return g.isNotEmpty && g != '0';
+}
+
 // ─── Widget principal ─────────────────────────────────────────────────────────
 class ListeMatchsTab extends StatefulWidget {
   const ListeMatchsTab({super.key});
@@ -37,8 +47,6 @@ class ListeMatchsTab extends StatefulWidget {
 class _ListeMatchsTabState extends State<ListeMatchsTab> {
   final _supabase = Supabase.instance.client;
 
-  // Tous les matchs chargés, clés : 'cat', 'poule', 'id', 'Equipe1', 'Equipe2',
-  // 'Start', 'Terrain', 'Arbitre', 'Gagnant', 'Score1', 'Score2'
   List<Map<String, dynamic>> _matchs = [];
   bool _chargement = true;
   String? _erreur;
@@ -65,7 +73,6 @@ class _ListeMatchsTabState extends State<ListeMatchsTab> {
           tous.add({...Map<String, dynamic>.from(r), 'cat': cat});
         }
       }
-      // Tri global : catégorie → poule → start
       tous.sort((a, b) {
         final catCmp = (a['cat'] as String).compareTo(b['cat'] as String);
         if (catCmp != 0) return catCmp;
@@ -92,7 +99,7 @@ class _ListeMatchsTabState extends State<ListeMatchsTab> {
         .eq('id', match['id']);
   }
 
-  // ── Dialog d'édition ──────────────────────────────────────────────────────
+  // ── Dialog d'édition (match non terminé — inchangé) ───────────────────────
   Future<void> _ouvrirEdition(Map<String, dynamic> match) async {
     final ctrlTerrain = TextEditingController(text: match['Terrain']?.toString() ?? '');
     final ctrlArbitre = TextEditingController(text: match['Arbitre']?.toString() ?? '');
@@ -122,7 +129,6 @@ class _ListeMatchsTabState extends State<ListeMatchsTab> {
               mainAxisSize: MainAxisSize.min,
               crossAxisAlignment: CrossAxisAlignment.start,
               children: [
-                // Poule info
                 Container(
                   padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 6),
                   decoration: BoxDecoration(
@@ -140,7 +146,6 @@ class _ListeMatchsTabState extends State<ListeMatchsTab> {
                 ),
                 const SizedBox(height: 16),
 
-                // Horaire
                 const Text('Horaire', style: TextStyle(fontSize: 12, fontWeight: FontWeight.w700, color: Colors.grey)),
                 const SizedBox(height: 6),
                 InkWell(
@@ -189,7 +194,6 @@ class _ListeMatchsTabState extends State<ListeMatchsTab> {
                 ),
                 const SizedBox(height: 14),
 
-                // Terrain
                 const Text('Terrain', style: TextStyle(fontSize: 12, fontWeight: FontWeight.w700, color: Colors.grey)),
                 const SizedBox(height: 6),
                 TextField(
@@ -205,7 +209,6 @@ class _ListeMatchsTabState extends State<ListeMatchsTab> {
                 ),
                 const SizedBox(height: 14),
 
-                // Arbitre
                 const Text('Arbitre', style: TextStyle(fontSize: 12, fontWeight: FontWeight.w700, color: Colors.grey)),
                 const SizedBox(height: 6),
                 TextField(
@@ -236,7 +239,6 @@ class _ListeMatchsTabState extends State<ListeMatchsTab> {
                 shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(8)),
               ),
               onPressed: () async {
-                // Mettre à jour la map locale
                 match['Start']   = dateChoisie?.toIso8601String() ?? match['Start'];
                 match['Terrain'] = ctrlTerrain.text.trim().isEmpty ? null : ctrlTerrain.text.trim();
                 match['Arbitre'] = ctrlArbitre.text.trim().isEmpty ? null : ctrlArbitre.text.trim();
@@ -263,6 +265,19 @@ class _ListeMatchsTabState extends State<ListeMatchsTab> {
             ),
           ],
         ),
+      ),
+    );
+  }
+
+  // ── NOUVEAU — Dialog feuille de match (match terminé) ─────────────────────
+  void _ouvrirFeuille(Map<String, dynamic> match) {
+    final color = _catColors[match['cat'] as String] ?? const Color(0xFF1A5C2A);
+    showDialog(
+      context: context,
+      builder: (_) => _FeuilleMatchDialog(
+        match: match,
+        accentColor: color,
+        supabase: _supabase,
       ),
     );
   }
@@ -353,7 +368,6 @@ class _ListeMatchsTabState extends State<ListeMatchsTab> {
   Widget build(BuildContext context) {
     return Column(
       children: [
-        // Barre de filtre catégorie
         Container(
           color: Colors.white,
           padding: const EdgeInsets.fromLTRB(16, 10, 16, 10),
@@ -378,7 +392,6 @@ class _ListeMatchsTabState extends State<ListeMatchsTab> {
                 ),
               )),
               const Spacer(),
-              // Compteurs rapides
               _buildCompteur(),
               const SizedBox(width: 8),
               IconButton(
@@ -391,7 +404,6 @@ class _ListeMatchsTabState extends State<ListeMatchsTab> {
         ),
         const Divider(height: 1),
 
-        // Corps
         Expanded(
           child: _chargement
               ? const Center(child: CircularProgressIndicator(color: Color(0xFF1A5C2A)))
@@ -457,7 +469,6 @@ class _ListeMatchsTabState extends State<ListeMatchsTab> {
       );
     }
 
-    // Grouper par poule
     final Map<String, List<Map<String, dynamic>>> parPoule = {};
     for (final m in filtres) {
       final p = m['Poule']?.toString() ?? '?';
@@ -467,17 +478,16 @@ class _ListeMatchsTabState extends State<ListeMatchsTab> {
     return ListView(
       padding: const EdgeInsets.fromLTRB(16, 12, 16, 24),
       children: parPoule.entries.map((entry) {
-        final poule = entry.key;
-        final matchsPoule = entry.value;
         return _PouleSection(
-          poule: poule,
+          poule: entry.key,
           cat: _catFiltre,
-          matchs: matchsPoule,
+          matchs: entry.value,
           catColor: _catColors[_catFiltre] ?? Colors.grey,
           catFond: _catFond[_catFiltre] ?? const Color(0xFFF0F0F0),
           formatDate: _formatDate,
           statutBadge: _statutBadge,
           onEdit: _ouvrirEdition,
+          onFeuille: _ouvrirFeuille, // NOUVEAU
         );
       }).toList(),
     );
@@ -494,6 +504,7 @@ class _PouleSection extends StatelessWidget {
   final String Function(String?) formatDate;
   final Widget Function(Map<String, dynamic>) statutBadge;
   final Future<void> Function(Map<String, dynamic>) onEdit;
+  final void Function(Map<String, dynamic>) onFeuille; // NOUVEAU
 
   const _PouleSection({
     required this.poule,
@@ -504,14 +515,12 @@ class _PouleSection extends StatelessWidget {
     required this.formatDate,
     required this.statutBadge,
     required this.onEdit,
+    required this.onFeuille,
   });
 
   @override
   Widget build(BuildContext context) {
-    final termines = matchs.where((m) {
-      final g = m['Gagnant']?.toString() ?? '0';
-      return g != '0' && g.isNotEmpty;
-    }).length;
+    final termines = matchs.where((m) => _estTermine(m)).length;
 
     return Container(
       margin: const EdgeInsets.only(bottom: 16),
@@ -530,7 +539,6 @@ class _PouleSection extends StatelessWidget {
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.stretch,
         children: [
-          // En-tête poule
           Container(
             padding: const EdgeInsets.fromLTRB(16, 12, 16, 12),
             decoration: BoxDecoration(
@@ -564,7 +572,6 @@ class _PouleSection extends StatelessWidget {
                   style: TextStyle(fontSize: 11, color: catColor.withOpacity(0.8)),
                 ),
                 const SizedBox(width: 8),
-                // Mini barre de progression
                 SizedBox(
                   width: 60,
                   child: ClipRRect(
@@ -581,19 +588,15 @@ class _PouleSection extends StatelessWidget {
             ),
           ),
 
-          // Lignes de matchs
-          ...matchs.asMap().entries.map((e) {
-            final i = e.key;
-            final m = e.value;
-            return _MatchRow(
-              match: m,
-              isLast: i == matchs.length - 1,
-              catColor: catColor,
-              formatDate: formatDate,
-              statutBadge: statutBadge,
-              onEdit: onEdit,
-            );
-          }),
+          ...matchs.asMap().entries.map((e) => _MatchRow(
+            match: e.value,
+            isLast: e.key == matchs.length - 1,
+            catColor: catColor,
+            formatDate: formatDate,
+            statutBadge: statutBadge,
+            onEdit: onEdit,
+            onFeuille: onFeuille, // NOUVEAU
+          )),
         ],
       ),
     );
@@ -608,6 +611,7 @@ class _MatchRow extends StatelessWidget {
   final String Function(String?) formatDate;
   final Widget Function(Map<String, dynamic>) statutBadge;
   final Future<void> Function(Map<String, dynamic>) onEdit;
+  final void Function(Map<String, dynamic>) onFeuille; // NOUVEAU
 
   const _MatchRow({
     required this.match,
@@ -616,19 +620,21 @@ class _MatchRow extends StatelessWidget {
     required this.formatDate,
     required this.statutBadge,
     required this.onEdit,
+    required this.onFeuille,
   });
 
   @override
   Widget build(BuildContext context) {
     final terrain = match['Terrain']?.toString() ?? '';
     final arbitre = match['Arbitre']?.toString() ?? '';
-    final score1 = match['Score1']?.toString() ?? '—';
-    final score2 = match['Score2']?.toString() ?? '—';
+    final score1  = match['Score1']?.toString() ?? '—';
+    final score2  = match['Score2']?.toString() ?? '—';
     final gagnant = match['Gagnant']?.toString() ?? '0';
-    final termine = gagnant != '0' && gagnant.isNotEmpty;
+    final termine = _estTermine(match);
 
     return InkWell(
-      onTap: () => onEdit(match),
+      // MODIFIÉ : routing selon état du match
+      onTap: () => termine ? onFeuille(match) : onEdit(match),
       borderRadius: isLast
           ? const BorderRadius.vertical(bottom: Radius.circular(12))
           : BorderRadius.zero,
@@ -641,7 +647,6 @@ class _MatchRow extends StatelessWidget {
         ),
         child: Row(
           children: [
-            // Numéro de match
             SizedBox(
               width: 28,
               child: Text(
@@ -654,7 +659,6 @@ class _MatchRow extends StatelessWidget {
               ),
             ),
 
-            // Équipes + score
             Expanded(
               flex: 5,
               child: Row(
@@ -708,7 +712,6 @@ class _MatchRow extends StatelessWidget {
 
             const SizedBox(width: 8),
 
-            // Horaire
             Expanded(
               flex: 3,
               child: Row(
@@ -726,7 +729,6 @@ class _MatchRow extends StatelessWidget {
               ),
             ),
 
-            // Terrain
             Expanded(
               flex: 2,
               child: Row(
@@ -748,7 +750,6 @@ class _MatchRow extends StatelessWidget {
               ),
             ),
 
-            // Arbitre
             Expanded(
               flex: 2,
               child: Row(
@@ -770,14 +771,209 @@ class _MatchRow extends StatelessWidget {
               ),
             ),
 
-            // Statut
             statutBadge(match),
 
-            // Icône édition
             const SizedBox(width: 8),
-            Icon(Icons.edit_outlined, size: 16, color: Colors.grey.shade400),
+            // MODIFIÉ : icône PDF si terminé, crayon sinon
+            Icon(
+              termine ? Icons.picture_as_pdf_rounded : Icons.edit_outlined,
+              size: 16,
+              color: termine ? catColor.withOpacity(0.6) : Colors.grey.shade400,
+            ),
           ],
         ),
+      ),
+    );
+  }
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// NOUVEAU — Dialog feuille de match (match terminé uniquement)
+// Filtre le bucket "feuille de match" sur match["id"] (5e segment du nom)
+// Format du nom : {cat}_{codeEq1}_vs_{codeEq2}_{matchId}_{date}.pdf
+// ─────────────────────────────────────────────────────────────────────────────
+class _FeuilleMatchDialog extends StatefulWidget {
+  final Map<String, dynamic> match;
+  final Color accentColor;
+  final SupabaseClient supabase;
+
+  const _FeuilleMatchDialog({
+    required this.match,
+    required this.accentColor,
+    required this.supabase,
+  });
+
+  @override
+  State<_FeuilleMatchDialog> createState() => _FeuilleMatchDialogState();
+}
+
+class _FeuilleMatchDialogState extends State<_FeuilleMatchDialog> {
+  List<Map<String, String>> _fichiers = [];
+  bool _chargement = true;
+  String? _erreur;
+
+  @override
+  void initState() {
+    super.initState();
+    _charger();
+  }
+
+  Future<void> _charger() async {
+    try {
+      final matchId = widget.match['id']?.toString() ?? '';
+      final fichiers = await widget.supabase.storage.from('feuille de match').list();
+
+      final filtres = fichiers
+          .where((f) {
+        if (!f.name.endsWith('.pdf')) return false;
+        final parts = f.name.replaceAll('.pdf', '').split('_');
+        if (parts.length >= 5) return parts[4] == matchId;
+        return f.name.contains('_${matchId}_') || f.name.contains('_$matchId.');
+      })
+          .map((f) {
+        final url = widget.supabase.storage
+            .from('feuille de match')
+            .getPublicUrl(f.name);
+        return {'name': f.name, 'url': url};
+      })
+          .toList();
+
+      filtres.sort((a, b) => (b['name'] ?? '').compareTo(a['name'] ?? ''));
+      setState(() { _fichiers = filtres; _chargement = false; });
+    } catch (e) {
+      setState(() { _erreur = e.toString(); _chargement = false; });
+    }
+  }
+
+  String _label(String name) {
+    try {
+      final parts = name.replaceAll('.pdf', '').split('_');
+      if (parts.length >= 5) {
+        final cat   = parts[0];
+        final code1 = parts[1];
+        final code2 = parts[3];
+        final date  = parts.length > 5 ? parts[5] : '';
+        String dateLisible = date;
+        if (date.length >= 13) {
+          dateLisible =
+          '${date.substring(6, 8)}/${date.substring(4, 6)} ${date.substring(9, 11)}h${date.substring(11, 13)}';
+        }
+        return '$cat — $code1 vs $code2  ·  $dateLisible';
+      }
+    } catch (_) {}
+    return name;
+  }
+
+  Future<void> _ouvrir(String url) async {
+    final uri = Uri.parse(url);
+    if (await canLaunchUrl(uri)) await launchUrl(uri, mode: LaunchMode.externalApplication);
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final color   = widget.accentColor;
+    final equipe1 = widget.match['Equipe1']?.toString() ?? '—';
+    final equipe2 = widget.match['Equipe2']?.toString() ?? '—';
+
+    return Dialog(
+      shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
+      child: ConstrainedBox(
+        constraints: const BoxConstraints(maxWidth: 520, maxHeight: 500),
+        child: Column(mainAxisSize: MainAxisSize.min, crossAxisAlignment: CrossAxisAlignment.stretch, children: [
+
+          Container(
+            padding: const EdgeInsets.fromLTRB(20, 18, 16, 16),
+            decoration: BoxDecoration(
+              color: color.withOpacity(0.07),
+              borderRadius: const BorderRadius.vertical(top: Radius.circular(16)),
+              border: Border(bottom: BorderSide(color: color.withOpacity(0.2))),
+            ),
+            child: Row(children: [
+              Container(
+                width: 40, height: 40,
+                decoration: BoxDecoration(color: color.withOpacity(0.12), borderRadius: BorderRadius.circular(10)),
+                child: Icon(Icons.picture_as_pdf_rounded, color: color, size: 20),
+              ),
+              const SizedBox(width: 12),
+              Expanded(
+                child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+                  Text('Feuille de match',
+                      style: TextStyle(fontSize: 15, fontWeight: FontWeight.w800, color: color)),
+                  Text('$equipe1 vs $equipe2',
+                      style: const TextStyle(fontSize: 12, color: Colors.grey),
+                      overflow: TextOverflow.ellipsis),
+                ]),
+              ),
+              IconButton(
+                icon: const Icon(Icons.close, size: 18),
+                onPressed: () => Navigator.pop(context),
+              ),
+            ]),
+          ),
+
+          Flexible(
+            child: _chargement
+                ? const Center(child: Padding(padding: EdgeInsets.all(32), child: CircularProgressIndicator()))
+                : _erreur != null
+                ? Padding(
+              padding: const EdgeInsets.all(24),
+              child: Column(mainAxisSize: MainAxisSize.min, children: [
+                const Icon(Icons.wifi_off, size: 36, color: Color(0xFFE57373)),
+                const SizedBox(height: 12),
+                Text(_erreur!, style: const TextStyle(fontSize: 12, color: Colors.grey), textAlign: TextAlign.center),
+                const SizedBox(height: 16),
+                TextButton(
+                  onPressed: () { setState(() { _chargement = true; _erreur = null; }); _charger(); },
+                  child: const Text('Réessayer'),
+                ),
+              ]),
+            )
+                : _fichiers.isEmpty
+                ? Padding(
+              padding: const EdgeInsets.all(32),
+              child: Column(mainAxisSize: MainAxisSize.min, children: [
+                Icon(Icons.folder_off_outlined, size: 40, color: Colors.grey.shade300),
+                const SizedBox(height: 12),
+                const Text(
+                  'Aucune feuille générée pour ce match.',
+                  style: TextStyle(fontSize: 12, color: Colors.grey),
+                  textAlign: TextAlign.center,
+                ),
+              ]),
+            )
+                : ListView.separated(
+              padding: const EdgeInsets.fromLTRB(16, 8, 16, 16),
+              shrinkWrap: true,
+              itemCount: _fichiers.length,
+              separatorBuilder: (_, __) => const SizedBox(height: 6),
+              itemBuilder: (ctx, i) {
+                final f = _fichiers[i];
+                return InkWell(
+                  borderRadius: BorderRadius.circular(10),
+                  onTap: () => _ouvrir(f['url']!),
+                  child: Container(
+                    padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 12),
+                    decoration: BoxDecoration(
+                      color: color.withOpacity(0.06),
+                      borderRadius: BorderRadius.circular(10),
+                      border: Border.all(color: color.withOpacity(0.2)),
+                    ),
+                    child: Row(children: [
+                      Icon(Icons.picture_as_pdf_rounded, color: color, size: 22),
+                      const SizedBox(width: 12),
+                      Expanded(
+                        child: Text(_label(f['name']!),
+                            style: const TextStyle(fontSize: 12, fontWeight: FontWeight.w600),
+                            overflow: TextOverflow.ellipsis),
+                      ),
+                      Icon(Icons.open_in_new, size: 14, color: Colors.grey.shade400),
+                    ]),
+                  ),
+                );
+              },
+            ),
+          ),
+        ]),
       ),
     );
   }
