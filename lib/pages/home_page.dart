@@ -4,6 +4,7 @@ import 'joueurs_page.dart';
 import 'equipes_page.dart';
 import 'Pompom_page.dart';
 import 'suivi_matchs_fauteuil_page.dart';
+import 'arbitrage_page.dart';
 
 class HomePage extends StatelessWidget {
   const HomePage({super.key});
@@ -261,7 +262,23 @@ class HomePage extends StatelessWidget {
                 MaterialPageRoute(builder: (_) => const SuiviMatchsFauteilPage()),
               ),
             ),
-
+            _ModuleCard(
+              icon: Icons.sports_rounded,
+              titre: 'Arbitrage des matchs',
+              sousTitre: 'Saisie des scores, cartons et génération des feuilles de match',
+              couleur: const Color(0xFFB5338A),
+              couleurFond: const Color(0xFFF9E8F5),
+              badge: 'Disponible',
+              badgeCouleur: const Color(0xFFB5338A),
+              points: const [
+                'Scores et essais en temps réel',
+                'Feuille de match PDF avec signatures',
+              ],
+              onTap: () => Navigator.push(
+                context,
+                MaterialPageRoute(builder: (_) => const ArbitragePage()),
+              ),
+            ),
           ],
         );
       },

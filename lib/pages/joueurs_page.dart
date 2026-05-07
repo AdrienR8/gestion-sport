@@ -1,8 +1,4 @@
-import 'dart:io';
 import 'package:flutter/material.dart';
-import 'package:http/http.dart' as http;
-import 'package:flutter_pdfview/flutter_pdfview.dart';
-import 'package:path_provider/path_provider.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
 import 'dart:js_interop';
 import 'package:web/web.dart' as web;
@@ -457,7 +453,12 @@ class _JoueursPageState extends State<JoueursPage> {
       ));
       return;
     }
-    showDialog(context: context, builder: (ctx) => _FeuillesMatchDialog(joueur: joueur));
+    await showDialog(
+      context: context,
+      builder: (ctx) => _FeuillesMatchDialog(joueur: joueur),
+    );
+    // Rafraîchir la liste après fermeture (les cartons ont pu être modifiés)
+    _charger();
   }
 
   Widget _buildEmptyState() {
@@ -488,7 +489,7 @@ class _JoueursPageState extends State<JoueursPage> {
 }
 
 // ═══════════════════════════════════════════════════════════
-// CARTE JOUEUR
+// CARTE JOUEUR — inchangée
 // ═══════════════════════════════════════════════════════════
 class _JoueurCard extends StatelessWidget {
   final Joueur joueur;
@@ -616,7 +617,7 @@ class _CartonBadge extends StatelessWidget {
 }
 
 // ═══════════════════════════════════════════════════════════
-// DIALOG FEUILLES DE MATCH
+// DIALOG FEUILLES DE MATCH + GESTION CARTONS/SUSPENSIONS
 // ═══════════════════════════════════════════════════════════
 class _FeuillesMatchDialog extends StatefulWidget {
   final Joueur joueur;
@@ -631,6 +632,15 @@ class _FeuillesMatchDialogState extends State<_FeuillesMatchDialog> {
   bool _chargement = true;
   String? _erreur;
 
+  // ── AJOUT : état local des cartons et suspensions ─────────────────────────
+  // Initialisé depuis widget.joueur, mis à jour après chaque suppression
+  late int _cartonJaune;
+  late int _cartonRouge;
+  late int _cartonBleu;
+  late bool _suspenduUnMatch;
+  late bool _suspenduDefinitif;
+  bool _suppressionEnCours = false;
+
   static const Map<String, Color> _catColors = {
     'R15M': Color(0xFF1A5C2A), 'R7M': Color(0xFF8B4513),
     'R7F': Color(0xFF6B1A5C), 'RF': Color(0xFF1A4A7A), 'PP': Color(0xFFB5338A),
@@ -639,60 +649,244 @@ class _FeuillesMatchDialogState extends State<_FeuillesMatchDialog> {
   @override
   void initState() {
     super.initState();
+    // Initialiser l'état local depuis le joueur passé en paramètre
+    _cartonJaune     = widget.joueur.cartonJaune;
+    _cartonRouge     = widget.joueur.cartonRouge;
+    _cartonBleu      = widget.joueur.cartonBleu;
+    _suspenduUnMatch  = widget.joueur.suspenduUnMatch;
+    _suspenduDefinitif = widget.joueur.suspenduDefinitif;
     _chargerFeuilles();
   }
 
-  // ══════════════════════════════════════════════════════════════════════════
-  // CHARGEMENT DES FEUILLES — LOGIQUE CORRIGÉE
-  //
-  // Le nom du fichier généré par modif_match_page est :
-  //   {cat}_{CodeEquipe1}_vs_{CodeEquipe2}_{matchId}_{timestamp}.pdf
-  //
-  // Le team_code du joueur = id dans Equipes = CodeEquipe1 ou CodeEquipe2
-  // → on filtre les fichiers dont le nom CONTIENT le team_code du joueur
-  //   ET qui ont l'extension .pdf
-  //   ET on vérifie que le team_code est bien un segment entier du nom
-  //   (pas une correspondance partielle accidentelle)
-  // ══════════════════════════════════════════════════════════════════════════
+  // ── AJOUT : suppression d'un type de carton ───────────────────────────────
+  Future<void> _supprimerCarton(String type) async {
+    final champ = type == 'jaune' ? 'carton_jaune'
+        : type == 'rouge' ? 'carton_rouge'
+        : 'carton_bleu';
+
+    final confirmed = await _confirmer(
+      'Supprimer les cartons ${type}s ?',
+      'Remettre à 0 tous les cartons ${type}s de ${widget.joueur.nomComplet}.',
+    );
+    if (!confirmed) return;
+
+    setState(() => _suppressionEnCours = true);
+    try {
+      await _supabase.from('joueur').update({champ: 0}).eq('id', widget.joueur.id);
+      setState(() {
+        if (type == 'jaune') _cartonJaune = 0;
+        else if (type == 'rouge') _cartonRouge = 0;
+        else _cartonBleu = 0;
+      });
+      _snack('Cartons ${type}s remis à 0', color: const Color(0xFF2D9148));
+    } catch (e) {
+      _snack('Erreur : $e', color: const Color(0xFFE53E3E));
+    } finally {
+      setState(() => _suppressionEnCours = false);
+    }
+  }
+
+  // ── AJOUT : lever une suspension ──────────────────────────────────────────
+  Future<void> _leverSuspension(String type) async {
+    final champ        = type == 'match' ? 'suspendu_un_match' : 'suspendu_definitif';
+    final champComptes = type == 'match' ? 'Suspendu1match' : 'Suspendudefinitif';
+    final label        = type == 'match' ? 'suspension 1 match' : 'suspension définitive';
+
+    final confirmed = await _confirmer(
+      'Lever la $label ?',
+      'Retirer la $label de ${widget.joueur.nomComplet}.',
+    );
+    if (!confirmed) return;
+
+    setState(() => _suppressionEnCours = true);
+    try {
+      await _supabase.from('joueur').update({champ: false}).eq('id', widget.joueur.id);
+      // Lever aussi dans Comptes pour cohérence avec l'app mobile
+      await _supabase.from('joueur').update({champComptes: false}).eq('id', widget.joueur.compteId);
+      setState(() {
+        if (type == 'match') _suspenduUnMatch = false;
+        else _suspenduDefinitif = false;
+      });
+      _snack('${label[0].toUpperCase()}${label.substring(1)} levée', color: const Color(0xFF2D9148));
+    } catch (e) {
+      _snack('Erreur : $e', color: const Color(0xFFE53E3E));
+    } finally {
+      setState(() => _suppressionEnCours = false);
+    }
+  }
+
+  // ── AJOUT : dialog de confirmation ────────────────────────────────────────
+  Future<bool> _confirmer(String titre, String message) async {
+    final result = await showDialog<bool>(
+      context: context,
+      builder: (ctx) => AlertDialog(
+        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(14)),
+        title: Text(titre, style: const TextStyle(fontSize: 15, fontWeight: FontWeight.w700)),
+        content: Text(message, style: const TextStyle(fontSize: 13, height: 1.5)),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.pop(ctx, false),
+            child: const Text('Annuler', style: TextStyle(color: Colors.grey)),
+          ),
+          ElevatedButton(
+            style: ElevatedButton.styleFrom(
+              backgroundColor: const Color(0xFFE53E3E), foregroundColor: Colors.white,
+              shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(8)),
+            ),
+            onPressed: () => Navigator.pop(ctx, true),
+            child: const Text('Confirmer'),
+          ),
+        ],
+      ),
+    );
+    return result ?? false;
+  }
+
+  // ── AJOUT : snackbar interne au dialog ────────────────────────────────────
+  void _snack(String msg, {required Color color}) {
+    if (!mounted) return;
+    ScaffoldMessenger.of(context).showSnackBar(SnackBar(
+      content: Text(msg, style: const TextStyle(fontSize: 13)),
+      backgroundColor: color,
+      duration: const Duration(seconds: 2),
+      behavior: SnackBarBehavior.floating,
+      shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(10)),
+      margin: const EdgeInsets.fromLTRB(16, 0, 16, 16),
+    ));
+  }
+
+  // ── AJOUT : section sanctions (cartons + suspensions) ────────────────────
+  Widget _sectionSanctions() {
+    final aCartons     = _cartonJaune > 0 || _cartonRouge > 0 || _cartonBleu > 0;
+    final aSuspensions = _suspenduUnMatch || _suspenduDefinitif;
+
+    if (!aCartons && !aSuspensions) {
+      return Container(
+        margin: const EdgeInsets.fromLTRB(16, 12, 16, 0),
+        padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 10),
+        decoration: BoxDecoration(
+          color: const Color(0xFFEAF5EC),
+          borderRadius: BorderRadius.circular(10),
+          border: Border.all(color: const Color(0xFF90C99A)),
+        ),
+        child: Row(children: [
+          const Icon(Icons.check_circle_outline, size: 16, color: Color(0xFF1A5C2A)),
+          const SizedBox(width: 8),
+          Text('Aucun carton ni suspension', style: TextStyle(fontSize: 12, color: Colors.grey.shade700)),
+        ]),
+      );
+    }
+
+    return Container(
+      margin: const EdgeInsets.fromLTRB(16, 12, 16, 0),
+      decoration: BoxDecoration(
+        color: Colors.white,
+        borderRadius: BorderRadius.circular(12),
+        border: Border.all(color: const Color(0xFFE8E8E8)),
+      ),
+      child: Column(crossAxisAlignment: CrossAxisAlignment.stretch, children: [
+        // En-tête section
+        Container(
+          padding: const EdgeInsets.fromLTRB(14, 10, 14, 10),
+          decoration: BoxDecoration(
+            color: const Color(0xFFFFF3CD),
+            borderRadius: const BorderRadius.vertical(top: Radius.circular(11)),
+            border: Border(bottom: BorderSide(color: Colors.orange.withOpacity(0.3))),
+          ),
+          child: Row(children: [
+            const Icon(Icons.warning_amber_rounded, size: 15, color: Color(0xFFD47A1A)),
+            const SizedBox(width: 6),
+            const Text('Sanctions enregistrées',
+                style: TextStyle(fontSize: 12, fontWeight: FontWeight.w700, color: Color(0xFFD47A1A))),
+            const Spacer(),
+            if (_suppressionEnCours)
+              const SizedBox(width: 14, height: 14,
+                  child: CircularProgressIndicator(strokeWidth: 2, color: Color(0xFFD47A1A))),
+          ]),
+        ),
+
+        Padding(
+          padding: const EdgeInsets.all(12),
+          child: Wrap(spacing: 8, runSpacing: 8, children: [
+
+            // ── Carton Jaune ────────────────────────────────────────────────
+            if (_cartonJaune > 0)
+              _SanctionChip(
+                label: 'Carton Jaune',
+                count: _cartonJaune,
+                color: const Color(0xFFD4A017),
+                onSupprimer: _suppressionEnCours ? null : () => _supprimerCarton('jaune'),
+              ),
+
+            // ── Carton Rouge ────────────────────────────────────────────────
+            if (_cartonRouge > 0)
+              _SanctionChip(
+                label: 'Carton Rouge',
+                count: _cartonRouge,
+                color: const Color(0xFFE53E3E),
+                onSupprimer: _suppressionEnCours ? null : () => _supprimerCarton('rouge'),
+              ),
+
+            // ── Carton Bleu ─────────────────────────────────────────────────
+            if (_cartonBleu > 0)
+              _SanctionChip(
+                label: 'Carton Bleu',
+                count: _cartonBleu,
+                color: const Color(0xFF1A4A7A),
+                onSupprimer: _suppressionEnCours ? null : () => _supprimerCarton('bleu'),
+              ),
+
+            // ── Suspendu 1 match ────────────────────────────────────────────
+            if (_suspenduUnMatch)
+              _SanctionChip(
+                label: 'Suspendu 1 match',
+                color: Colors.orange,
+                onSupprimer: _suppressionEnCours ? null : () => _leverSuspension('match'),
+              ),
+
+            // ── Suspendu définitivement ─────────────────────────────────────
+            if (_suspenduDefinitif)
+              _SanctionChip(
+                label: 'Suspendu définitivement',
+                color: const Color(0xFFE53E3E),
+                onSupprimer: _suppressionEnCours ? null : () => _leverSuspension('definitif'),
+              ),
+
+          ]),
+        ),
+      ]),
+    );
+  }
+
+  // ─────────────────────────────────────────────────────────────────────────
+  // Chargement feuilles — inchangé
+  // ─────────────────────────────────────────────────────────────────────────
   Future<void> _chargerFeuilles() async {
     setState(() { _chargement = true; _erreur = null; });
     try {
       final teamCode = widget.joueur.teamCode ?? '';
-
       if (teamCode.isEmpty) {
         setState(() { _fichiers = []; _chargement = false; });
         return;
       }
-
-      // Liste tous les fichiers du bucket
       final fichiers = await _supabase.storage.from('feuille de match').list();
-
-      // Format attendu : {cat}_{codeEq1}_vs_{codeEq2}_{matchId}_{timestamp}.pdf
-      // Le team_code apparaît en position 1 (codeEq1) ou 3 (codeEq2) quand on split par '_'
-      // On vérifie par segment pour éviter les faux positifs
       final filtres = fichiers.where((f) {
         if (!f.name.endsWith('.pdf')) return false;
-        final sans = f.name.replaceAll('.pdf', '');
+        final sans  = f.name.replaceAll('.pdf', '');
         final parts = sans.split('_');
-        // parts[0] = cat, parts[1] = codeEq1, parts[2] = 'vs', parts[3] = codeEq2
         if (parts.length < 4) return false;
         return parts[1] == teamCode || parts[3] == teamCode;
       }).map((f) {
         final url = _supabase.storage.from('feuille de match').getPublicUrl(f.name);
         return {'name': f.name, 'url': url};
       }).toList();
-
-      // Plus récents en premier
       filtres.sort((a, b) => (b['name'] ?? '').compareTo(a['name'] ?? ''));
-
       setState(() { _fichiers = filtres; _chargement = false; });
     } catch (e) {
       setState(() { _erreur = e.toString(); _chargement = false; });
     }
   }
 
-  // Décompose le nom structuré en label lisible
-  // Format : {cat}_{codeEq1}_vs_{codeEq2}_{matchId}_{date}.pdf
   String _labelFichier(String name) {
     try {
       final sans  = name.replaceAll('.pdf', '');
@@ -719,7 +913,8 @@ class _FeuillesMatchDialogState extends State<_FeuillesMatchDialog> {
       final sans  = name.replaceAll('.pdf', '');
       final parts = sans.split('_');
       if (parts.length >= 4) {
-        final code1 = parts[1]; final code2 = parts[3];
+        final code1    = parts[1];
+        final code2    = parts[3];
         final teamCode = widget.joueur.teamCode ?? '';
         return teamCode == code1 ? 'vs $code2' : 'vs $code1';
       }
@@ -739,9 +934,10 @@ class _FeuillesMatchDialogState extends State<_FeuillesMatchDialog> {
       shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
       insetPadding: const EdgeInsets.symmetric(horizontal: 20, vertical: 40),
       child: ConstrainedBox(
-        constraints: BoxConstraints(maxHeight: MediaQuery.of(context).size.height * 0.75),
+        constraints: BoxConstraints(maxHeight: MediaQuery.of(context).size.height * 0.85),
         child: Column(mainAxisSize: MainAxisSize.min, crossAxisAlignment: CrossAxisAlignment.stretch, children: [
-          // En-tête joueur
+
+          // ── En-tête joueur — inchangé ──────────────────────────────────────
           Padding(
             padding: const EdgeInsets.fromLTRB(20, 20, 12, 12),
             child: Row(children: [
@@ -772,8 +968,15 @@ class _FeuillesMatchDialogState extends State<_FeuillesMatchDialog> {
               IconButton(icon: const Icon(Icons.close, size: 18), onPressed: () => Navigator.pop(context), color: Colors.grey),
             ]),
           ),
-          Container(
-            padding: const EdgeInsets.fromLTRB(20, 12, 20, 8),
+
+          // ── NOUVEAU : section sanctions ────────────────────────────────────
+          _sectionSanctions(),
+          const SizedBox(height: 12),
+          const Divider(height: 1),
+
+          // ── Titre feuilles — inchangé ──────────────────────────────────────
+          Padding(
+            padding: const EdgeInsets.fromLTRB(20, 10, 20, 8),
             child: Row(children: [
               const Icon(Icons.description_outlined, size: 14, color: Color(0xFF888888)),
               const SizedBox(width: 6),
@@ -786,6 +989,8 @@ class _FeuillesMatchDialogState extends State<_FeuillesMatchDialog> {
             ]),
           ),
           const Divider(height: 1),
+
+          // ── Liste feuilles — inchangée ─────────────────────────────────────
           Flexible(
             child: _chargement
                 ? const Center(child: Padding(padding: EdgeInsets.all(32),
@@ -811,43 +1016,44 @@ class _FeuillesMatchDialogState extends State<_FeuillesMatchDialog> {
                       style: TextStyle(fontSize: 11, color: Colors.grey.shade400), textAlign: TextAlign.center),
                 ]))
                 : ListView.separated(
-                padding: const EdgeInsets.fromLTRB(16, 8, 16, 16),
-                shrinkWrap: true,
-                itemCount: _fichiers.length,
-                separatorBuilder: (_, __) => const SizedBox(height: 6),
-                itemBuilder: (ctx, i) {
-                  final f = _fichiers[i];
-                  final label      = _labelFichier(f['name']!);
-                  final adversaire = _labelAdversaire(f['name']!);
-                  return InkWell(
-                    borderRadius: BorderRadius.circular(10),
-                    onTap: () => _ouvrirUrl(ctx, f['url']!),
-                    child: Container(
-                      padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 11),
-                      decoration: BoxDecoration(
-                        color: Colors.white, borderRadius: BorderRadius.circular(10),
-                        border: Border.all(color: const Color(0xFFE8E8E8)),
-                      ),
-                      child: Row(children: [
-                        Container(
-                          width: 36, height: 36,
-                          decoration: BoxDecoration(color: const Color(0xFFFFF0E8), borderRadius: BorderRadius.circular(8)),
-                          child: const Center(child: Text('PDF',
-                              style: TextStyle(fontSize: 9, fontWeight: FontWeight.w900, color: Color(0xFFD95F1A)))),
-                        ),
-                        const SizedBox(width: 12),
-                        Expanded(child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
-                          Text(label, style: const TextStyle(fontSize: 11, fontWeight: FontWeight.w600),
-                              overflow: TextOverflow.ellipsis),
-                          if (adversaire.isNotEmpty)
-                            Text(adversaire, style: TextStyle(fontSize: 10, color: Colors.grey.shade500)),
-                        ])),
-                        const SizedBox(width: 8),
-                        const Icon(Icons.picture_as_pdf, size: 16, color: Color(0xFFD95F1A)),
-                      ]),
+              padding: const EdgeInsets.fromLTRB(16, 8, 16, 16),
+              shrinkWrap: true,
+              itemCount: _fichiers.length,
+              separatorBuilder: (_, __) => const SizedBox(height: 6),
+              itemBuilder: (ctx, i) {
+                final f           = _fichiers[i];
+                final label       = _labelFichier(f['name']!);
+                final adversaire  = _labelAdversaire(f['name']!);
+                return InkWell(
+                  borderRadius: BorderRadius.circular(10),
+                  onTap: () => _ouvrirUrl(ctx, f['url']!),
+                  child: Container(
+                    padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 11),
+                    decoration: BoxDecoration(
+                      color: Colors.white, borderRadius: BorderRadius.circular(10),
+                      border: Border.all(color: const Color(0xFFE8E8E8)),
                     ),
-                  );
-                }),
+                    child: Row(children: [
+                      Container(
+                        width: 36, height: 36,
+                        decoration: BoxDecoration(color: const Color(0xFFFFF0E8), borderRadius: BorderRadius.circular(8)),
+                        child: const Center(child: Text('PDF',
+                            style: TextStyle(fontSize: 9, fontWeight: FontWeight.w900, color: Color(0xFFD95F1A)))),
+                      ),
+                      const SizedBox(width: 12),
+                      Expanded(child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+                        Text(label, style: const TextStyle(fontSize: 11, fontWeight: FontWeight.w600),
+                            overflow: TextOverflow.ellipsis),
+                        if (adversaire.isNotEmpty)
+                          Text(adversaire, style: TextStyle(fontSize: 10, color: Colors.grey.shade500)),
+                      ])),
+                      const SizedBox(width: 8),
+                      const Icon(Icons.picture_as_pdf, size: 16, color: Color(0xFFD95F1A)),
+                    ]),
+                  ),
+                );
+              },
+            ),
           ),
         ]),
       ),
@@ -856,47 +1062,59 @@ class _FeuillesMatchDialogState extends State<_FeuillesMatchDialog> {
 }
 
 // ═══════════════════════════════════════════════════════════
-// PAGE LECTEUR PDF IN-APP (inchangée)
+// NOUVEAU — Chip de sanction avec bouton supprimer
 // ═══════════════════════════════════════════════════════════
-class _PdfViewerPage extends StatefulWidget {
-  final String filePath;
-  final String titre;
-  const _PdfViewerPage({required this.filePath, required this.titre});
-  @override
-  State<_PdfViewerPage> createState() => _PdfViewerPageState();
-}
+class _SanctionChip extends StatelessWidget {
+  final String label;
+  final int? count;
+  final Color color;
+  final VoidCallback? onSupprimer;
 
-class _PdfViewerPageState extends State<_PdfViewerPage> {
-  int _pageActuelle = 0;
-  int _totalPages = 0;
+  const _SanctionChip({
+    required this.label,
+    required this.color,
+    required this.onSupprimer,
+    this.count,
+  });
 
   @override
   Widget build(BuildContext context) {
-    return Scaffold(
-      backgroundColor: Colors.grey.shade900,
-      appBar: AppBar(
-        backgroundColor: const Color(0xFF1A4A7A),
-        foregroundColor: Colors.white,
-        elevation: 0,
-        leading: IconButton(icon: const Icon(Icons.arrow_back), onPressed: () => Navigator.pop(context)),
-        title: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
-          const Text('Feuille de match', style: TextStyle(fontSize: 14, fontWeight: FontWeight.w700)),
-          if (_totalPages > 0)
-            Text('Page $_pageActuelle / $_totalPages', style: const TextStyle(fontSize: 11, color: Color(0xFF8BADD4))),
-        ]),
+    return Container(
+      padding: const EdgeInsets.fromLTRB(10, 6, 6, 6),
+      decoration: BoxDecoration(
+        color: color.withOpacity(0.08),
+        borderRadius: BorderRadius.circular(8),
+        border: Border.all(color: color.withOpacity(0.35)),
       ),
-      body: PDFView(
-        filePath: widget.filePath,
-        enableSwipe: true,
-        swipeHorizontal: false,
-        autoSpacing: true,
-        pageFling: true,
-        onRender: (pages) => setState(() => _totalPages = pages ?? 0),
-        onPageChanged: (page, _) => setState(() => _pageActuelle = (page ?? 0) + 1),
-        onError: (e) => ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(content: Text('Erreur PDF : $e'), backgroundColor: Colors.red),
+      child: Row(mainAxisSize: MainAxisSize.min, children: [
+        // Carton visuel
+        Container(
+          width: 9, height: 12,
+          decoration: BoxDecoration(color: color, borderRadius: BorderRadius.circular(2)),
         ),
-      ),
+        const SizedBox(width: 6),
+        Text(
+          count != null ? '$label ($count)' : label,
+          style: TextStyle(fontSize: 11, fontWeight: FontWeight.w700, color: color),
+        ),
+        const SizedBox(width: 8),
+        // Bouton supprimer
+        GestureDetector(
+          onTap: onSupprimer,
+          child: Container(
+            width: 20, height: 20,
+            decoration: BoxDecoration(
+              color: onSupprimer != null ? color.withOpacity(0.15) : Colors.grey.shade200,
+              borderRadius: BorderRadius.circular(4),
+            ),
+            child: Icon(
+              Icons.close,
+              size: 13,
+              color: onSupprimer != null ? color : Colors.grey.shade400,
+            ),
+          ),
+        ),
+      ]),
     );
   }
 }
