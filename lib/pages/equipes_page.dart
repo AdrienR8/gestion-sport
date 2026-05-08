@@ -318,11 +318,11 @@ class _EquipesPageState extends State<EquipesPage> {
             const SizedBox(width: 12),
             Expanded(child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
               Text(
-                eq.nom.isNotEmpty ? eq.nom : eq.id,
+                eq.ecole.isNotEmpty && eq.ecole != '0' ? eq.ecole : eq.id,
                 style: const TextStyle(fontSize: 14, fontWeight: FontWeight.w700, color: Color(0xFF1A1A1A)),
               ),
-              if (eq.ecole.isNotEmpty && eq.ecole != '0')
-                Text(eq.ecole, style: TextStyle(fontSize: 11, color: Colors.grey.shade500)),
+              if (eq.nom.isNotEmpty)
+                Text(eq.nom, style: TextStyle(fontSize: 11, color: Colors.grey.shade500)),
               const SizedBox(height: 4),
               Row(children: [
                 if (eq.poule.isNotEmpty && eq.poule != '0') ...[

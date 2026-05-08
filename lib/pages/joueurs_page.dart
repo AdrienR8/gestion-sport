@@ -534,9 +534,12 @@ class _JoueurCard extends StatelessWidget {
                 decoration: BoxDecoration(color: catColor.withOpacity(0.1), borderRadius: BorderRadius.circular(4)),
                 child: Text(joueur.categorie, style: TextStyle(fontSize: 9, fontWeight: FontWeight.w800, color: catColor)),
               ),
-              if (joueur.teamCode != null) ...[
+              if (joueur.nomEcole != null || joueur.teamCode != null) ...[
                 const SizedBox(width: 6),
-                Text(joueur.teamCode!, style: TextStyle(fontSize: 10, color: Colors.grey.shade500, fontFamily: 'monospace')),
+                Text(
+                  joueur.nomEcole ?? joueur.teamCode!,
+                  style: TextStyle(fontSize: 10, color: Colors.grey.shade500),
+                ),
               ],
             ]),
           ])),
