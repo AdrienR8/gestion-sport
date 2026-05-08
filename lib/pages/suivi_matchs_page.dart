@@ -1,29 +1,21 @@
 // lib/pages/suivi_matchs_page.dart
 //
-// Page "Suivi des matchs" — point d'entrée des deux nouvelles vues.
-// Remplace entièrement :
-//   • lib/pages/widgets/horaires_tab.dart  (supprimé)
-//   • lib/pages/widgets/generation_tab.dart (supprimé)
+// MODIFICATIONS v2 — Ajout de l'onglet "Consolantes"
 //
-// Elle est intégrée dans tirage_page.dart en tant qu'onglet n°2.
-// Elle peut aussi être ouverte de façon autonome depuis home_page.dart.
-//
-// MODIFICATIONS APPORTÉES :
-//   • Nouveau fichier
-//   • Contient un TabController avec 2 sous-onglets :
-//       1. "Liste des matchs" → ListeMatchsTab
-//       2. "Arbre du tournoi" → ArbreTournoiTab
+// CHANGEMENTS :
+//   • TabController(length: 2 → 3)
+//   • Import de widgets/consolantes_tab.dart
+//   • _buildTabBar() : 3ᵉ tab "Consolantes" avec Icons.emoji_events_outlined
+//   • TabBar standalone : idem
+//   • _buildBody() / TabBarView : ajout de ConsolantesTab()
 
 import 'package:flutter/material.dart';
 import 'widgets/liste_matchs_tab.dart';
 import 'widgets/arbre_tournoi_tab.dart';
+import 'widgets/consolantes_tab.dart'; // ← NOUVEAU
 
 class SuiviMatchsPage extends StatefulWidget {
-  /// Si [standaloneMode] est true, la page a sa propre AppBar et peut être
-  /// poussée directement depuis home_page.dart.
-  /// Si false, elle est utilisée comme corps d'un onglet de TiragePage.
   final bool standaloneMode;
-
   const SuiviMatchsPage({super.key, this.standaloneMode = false});
 
   @override
@@ -37,7 +29,7 @@ class _SuiviMatchsPageState extends State<SuiviMatchsPage>
   @override
   void initState() {
     super.initState();
-    _tabController = TabController(length: 2, vsync: this);
+    _tabController = TabController(length: 3, vsync: this); // ← 3
   }
 
   @override
@@ -46,7 +38,7 @@ class _SuiviMatchsPageState extends State<SuiviMatchsPage>
     super.dispose();
   }
 
-  // ── TabBar partagé ─────────────────────────────────────────────────────────
+  // ── TabBar partagé (mode onglet dans TiragePage) ───────────────────────────
   TabBar _buildTabBar() => TabBar(
     controller: _tabController,
     labelColor: const Color(0xFF1A5C2A),
@@ -56,26 +48,21 @@ class _SuiviMatchsPageState extends State<SuiviMatchsPage>
     labelStyle: const TextStyle(fontSize: 13, fontWeight: FontWeight.w700),
     unselectedLabelStyle: const TextStyle(fontSize: 13),
     tabs: const [
-      Tab(
-        child: Row(
-          mainAxisSize: MainAxisSize.min,
-          children: [
-            Icon(Icons.format_list_bulleted_rounded, size: 16),
-            SizedBox(width: 8),
-            Text('Liste des matchs'),
-          ],
-        ),
-      ),
-      Tab(
-        child: Row(
-          mainAxisSize: MainAxisSize.min,
-          children: [
-            Icon(Icons.account_tree_rounded, size: 16),
-            SizedBox(width: 8),
-            Text('Arbre du tournoi'),
-          ],
-        ),
-      ),
+      Tab(child: Row(mainAxisSize: MainAxisSize.min, children: [
+        Icon(Icons.format_list_bulleted_rounded, size: 16),
+        SizedBox(width: 8),
+        Text('Liste des matchs'),
+      ])),
+      Tab(child: Row(mainAxisSize: MainAxisSize.min, children: [
+        Icon(Icons.account_tree_rounded, size: 16),
+        SizedBox(width: 8),
+        Text('Arbre du tournoi'),
+      ])),
+      Tab(child: Row(mainAxisSize: MainAxisSize.min, children: [  // ← NOUVEAU
+        Icon(Icons.emoji_events_outlined, size: 16),
+        SizedBox(width: 8),
+        Text('Consolantes'),
+      ])),
     ],
   );
 
@@ -85,6 +72,7 @@ class _SuiviMatchsPageState extends State<SuiviMatchsPage>
     children: const [
       ListeMatchsTab(),
       ArbreTournoiTab(),
+      ConsolantesTab(), // ← NOUVEAU
     ],
   );
 
@@ -92,17 +80,11 @@ class _SuiviMatchsPageState extends State<SuiviMatchsPage>
   @override
   Widget build(BuildContext context) {
     if (!widget.standaloneMode) {
-      // Mode onglet dans TiragePage : pas d'AppBar propre, juste la tab + le corps
-      return Column(
-        children: [
-          Container(
-            color: Colors.white,
-            child: _buildTabBar(),
-          ),
-          const Divider(height: 1),
-          Expanded(child: _buildBody()),
-        ],
-      );
+      return Column(children: [
+        Container(color: Colors.white, child: _buildTabBar()),
+        const Divider(height: 1),
+        Expanded(child: _buildBody()),
+      ]);
     }
 
     // Mode standalone : AppBar complète
@@ -110,14 +92,12 @@ class _SuiviMatchsPageState extends State<SuiviMatchsPage>
       appBar: AppBar(
         backgroundColor: const Color(0xFF1A5C2A),
         foregroundColor: Colors.white,
-        title: const Row(
-          children: [
-            Text('Ovalies', style: TextStyle(fontWeight: FontWeight.w900, fontSize: 20)),
-            SizedBox(width: 8),
-            Text('Admin — Suivi des matchs',
-                style: TextStyle(fontSize: 14, fontWeight: FontWeight.w400, color: Color(0xFFAED6B5))),
-          ],
-        ),
+        title: const Row(children: [
+          Text('Ovalies', style: TextStyle(fontWeight: FontWeight.w900, fontSize: 20)),
+          SizedBox(width: 8),
+          Text('Admin — Suivi des matchs',
+              style: TextStyle(fontSize: 14, fontWeight: FontWeight.w400, color: Color(0xFFAED6B5))),
+        ]),
         bottom: PreferredSize(
           preferredSize: const Size.fromHeight(46),
           child: Container(
@@ -130,26 +110,21 @@ class _SuiviMatchsPageState extends State<SuiviMatchsPage>
               indicatorWeight: 3,
               labelStyle: const TextStyle(fontSize: 13, fontWeight: FontWeight.w700),
               tabs: const [
-                Tab(
-                  child: Row(
-                    mainAxisSize: MainAxisSize.min,
-                    children: [
-                      Icon(Icons.format_list_bulleted_rounded, size: 16),
-                      SizedBox(width: 8),
-                      Text('Liste des matchs'),
-                    ],
-                  ),
-                ),
-                Tab(
-                  child: Row(
-                    mainAxisSize: MainAxisSize.min,
-                    children: [
-                      Icon(Icons.account_tree_rounded, size: 16),
-                      SizedBox(width: 8),
-                      Text('Arbre du tournoi'),
-                    ],
-                  ),
-                ),
+                Tab(child: Row(mainAxisSize: MainAxisSize.min, children: [
+                  Icon(Icons.format_list_bulleted_rounded, size: 16),
+                  SizedBox(width: 8),
+                  Text('Liste des matchs'),
+                ])),
+                Tab(child: Row(mainAxisSize: MainAxisSize.min, children: [
+                  Icon(Icons.account_tree_rounded, size: 16),
+                  SizedBox(width: 8),
+                  Text('Arbre du tournoi'),
+                ])),
+                Tab(child: Row(mainAxisSize: MainAxisSize.min, children: [ // ← NOUVEAU
+                  Icon(Icons.emoji_events_outlined, size: 16),
+                  SizedBox(width: 8),
+                  Text('Consolantes'),
+                ])),
               ],
             ),
           ),

@@ -1,9 +1,24 @@
+// lib/pages/arbitrage_page.dart
+//
+// MODIFICATIONS v2 — Ajout de l'onglet "Consolantes"
+//
+// CHANGEMENTS :
+//   • TabController(length: 2 → 3)
+//   • _matchsConsolante : nouvelle map de données
+//   • _charger() : requête Consolante{cat} pour chaque catégorie
+//   • TabBar : 3ᵉ onglet avec Icons.emoji_events_outlined
+//   • TabBarView : _buildConsolantes()
+//   • _compteurGlobal() : inclut les consolantes
+//   • _ouvrirMatch() : transmet tableType selon la source
+//   • _buildConsolantes() : nouvelle méthode (clone de _buildArbre)
+//   • _phaseConsolante() : labels spécifiques aux consolantes
+
 import 'package:flutter/material.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
 import 'arbitrage_match_page.dart';
 
 // ─── Constantes ───────────────────────────────────────────────────────────────
-const _categories = ['R15M', 'R7M', 'R7F','RF'];
+const _categories = ['R15M', 'R7M', 'R7F', 'RF'];
 
 const Map<String, Color> _catColors = {
   'R15M': Color(0xFF1A5C2A),
@@ -26,6 +41,13 @@ const Map<String, String> _phases = {
   '4': 'Finale',
 };
 
+// Labels spécifiques aux consolantes
+const Map<String, String> _phasesConsolante = {
+  '1': 'Quart consolante',
+  '2': 'Demi consolante',
+  '3': 'Finale consolante',
+};
+
 // ─── Page principale ──────────────────────────────────────────────────────────
 class ArbitragePage extends StatefulWidget {
   const ArbitragePage({super.key});
@@ -37,12 +59,13 @@ class ArbitragePage extends StatefulWidget {
 class _ArbitragePageState extends State<ArbitragePage>
     with SingleTickerProviderStateMixin {
   final _supabase = Supabase.instance.client;
+
+  // 3 onglets : Poules / Phase finale / Consolantes
   late final TabController _tabController;
 
-  // Données poules : cat → liste de matchs
-  final Map<String, List<Map<String, dynamic>>> _matchsPoule = {};
-  // Données arbre : cat → liste de matchs
-  final Map<String, List<Map<String, dynamic>>> _matchsArbre = {};
+  final Map<String, List<Map<String, dynamic>>> _matchsPoule      = {};
+  final Map<String, List<Map<String, dynamic>>> _matchsArbre      = {};
+  final Map<String, List<Map<String, dynamic>>> _matchsConsolante = {};
 
   bool _chargement = true;
   String? _erreur;
@@ -51,7 +74,7 @@ class _ArbitragePageState extends State<ArbitragePage>
   @override
   void initState() {
     super.initState();
-    _tabController = TabController(length: 2, vsync: this);
+    _tabController = TabController(length: 3, vsync: this); // ← 3
     _charger();
   }
 
@@ -68,30 +91,42 @@ class _ArbitragePageState extends State<ArbitragePage>
       for (final cat in _categories) {
         // Poules
         try {
-          final pouleRows = await _supabase
+          final rows = await _supabase
               .from('Poule$cat')
               .select()
               .order('Poule', ascending: true)
               .order('id', ascending: true);
-          _matchsPoule[cat] = (pouleRows as List)
+          _matchsPoule[cat] = (rows as List)
               .map((r) => {...Map<String, dynamic>.from(r), 'cat': cat, 'tableType': 'poule'})
               .toList();
-        } catch (_) {
-          _matchsPoule[cat] = [];
-        }
+        } catch (_) { _matchsPoule[cat] = []; }
 
         // Arbre / phase finale
         try {
-          final arbreRows = await _supabase
+          final rows = await _supabase
               .from(cat)
               .select()
               .order('Niveau', ascending: true)
               .order('id', ascending: true);
-          _matchsArbre[cat] = (arbreRows as List)
+          _matchsArbre[cat] = (rows as List)
               .map((r) => {...Map<String, dynamic>.from(r), 'cat': cat, 'tableType': 'arbre'})
               .toList();
-        } catch (_) {
-          _matchsArbre[cat] = [];
+        } catch (_) { _matchsArbre[cat] = []; }
+
+        // Consolantes (RF n'a pas de table consolante)
+        if (cat != 'RF') {
+          try {
+            final rows = await _supabase
+                .from('Consolante$cat')
+                .select()
+                .order('Niveau', ascending: true)
+                .order('id', ascending: true);
+            _matchsConsolante[cat] = (rows as List)
+                .map((r) => {...Map<String, dynamic>.from(r), 'cat': cat, 'tableType': 'consolante'})
+                .toList();
+          } catch (_) { _matchsConsolante[cat] = []; }
+        } else {
+          _matchsConsolante[cat] = [];
         }
       }
       setState(() => _chargement = false);
@@ -100,26 +135,16 @@ class _ArbitragePageState extends State<ArbitragePage>
     }
   }
 
-  // ── Navigation vers la page d'arbitrage du match ──────────────────────────
+  // ── Navigation ─────────────────────────────────────────────────────────────
   void _ouvrirMatch(Map<String, dynamic> match) {
-    // On prépare la map au format attendu par ArbitrageMatchPage
-    // (même structure que widget.match dans ModifMatchPage)
     final matchData = Map<String, dynamic>.from(match);
-
-    // Ajouter CodeCategorie si absent (nécessaire pour la logique métier)
     matchData['CodeCategorie'] = match['cat'] ?? '';
-
-    // Pour les matchs de poule, on ajoute la clé "Poule" pour que
-    // ArbitrageMatchPage sache qu'il s'agit d'un match de poule
-    // (cohérent avec widget.match.containsKey("Poule") dans ModifMatchPage)
-    // La clé "Poule" existe déjà dans les données Supabase pour les poules.
+    // tableType est déjà dans matchData ('poule', 'arbre' ou 'consolante')
 
     Navigator.push(
       context,
-      MaterialPageRoute(
-        builder: (_) => ArbitrageMatchPage(match: matchData),
-      ),
-    ).then((_) => _charger()); // Rafraîchir après retour
+      MaterialPageRoute(builder: (_) => ArbitrageMatchPage(match: matchData)),
+    ).then((_) => _charger());
   }
 
   // ── Helpers ────────────────────────────────────────────────────────────────
@@ -162,10 +187,7 @@ class _ArbitragePageState extends State<ArbitragePage>
     final termines = matchs.where(_estTermine).length;
     return Container(
       padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 1),
-      decoration: BoxDecoration(
-        color: color.withOpacity(0.12),
-        borderRadius: BorderRadius.circular(10),
-      ),
+      decoration: BoxDecoration(color: color.withOpacity(0.12), borderRadius: BorderRadius.circular(10)),
       child: Text('$termines/${matchs.length}',
           style: TextStyle(fontSize: 9, fontWeight: FontWeight.w700, color: color)),
     );
@@ -174,9 +196,10 @@ class _ArbitragePageState extends State<ArbitragePage>
   // ── Build principal ────────────────────────────────────────────────────────
   @override
   Widget build(BuildContext context) {
-    final poulesCat = _matchsPoule[_catFiltre] ?? [];
-    final arbreCat  = _matchsArbre[_catFiltre] ?? [];
-    final catColor  = _catColors[_catFiltre] ?? Colors.grey;
+    final poulesCat     = _matchsPoule[_catFiltre]      ?? [];
+    final arbreCat      = _matchsArbre[_catFiltre]      ?? [];
+    final consolanteCat = _matchsConsolante[_catFiltre] ?? [];
+    final catColor      = _catColors[_catFiltre]        ?? Colors.grey;
 
     return Scaffold(
       backgroundColor: const Color(0xFFF5F5F0),
@@ -184,14 +207,12 @@ class _ArbitragePageState extends State<ArbitragePage>
         backgroundColor: catColor,
         foregroundColor: Colors.white,
         elevation: 0,
-        title: Row(
-          children: [
-            _badgeCat(_catFiltre),
-            const SizedBox(width: 10),
-            const Text('Arbitrage des matchs',
-                style: TextStyle(fontSize: 16, fontWeight: FontWeight.w700, color: Colors.white)),
-          ],
-        ),
+        title: Row(children: [
+          _badgeCat(_catFiltre),
+          const SizedBox(width: 10),
+          const Text('Arbitrage des matchs',
+              style: TextStyle(fontSize: 16, fontWeight: FontWeight.w700, color: Colors.white)),
+        ]),
         actions: [
           IconButton(
             icon: const Icon(Icons.refresh, color: Colors.white),
@@ -201,135 +222,122 @@ class _ArbitragePageState extends State<ArbitragePage>
           const SizedBox(width: 8),
         ],
       ),
-      body: Column(
-        children: [
-          // ── Filtre catégorie ──────────────────────────────────────────────
-          Container(
-            color: Colors.white,
-            padding: const EdgeInsets.fromLTRB(16, 10, 16, 10),
-            child: Row(
-              children: [
-                const Text('Catégorie :',
-                    style: TextStyle(fontSize: 12, fontWeight: FontWeight.w600, color: Colors.grey)),
-                const SizedBox(width: 10),
-                ..._categories.map((cat) => Padding(
-                  padding: const EdgeInsets.only(right: 8),
-                  child: ChoiceChip(
-                    label: Text(cat, style: const TextStyle(fontSize: 11)),
-                    selected: _catFiltre == cat,
-                    selectedColor: (_catColors[cat] ?? Colors.grey).withOpacity(0.15),
-                    labelStyle: TextStyle(
-                      color: _catFiltre == cat ? (_catColors[cat] ?? Colors.grey) : Colors.grey,
-                      fontWeight: _catFiltre == cat ? FontWeight.w700 : FontWeight.normal,
-                    ),
-                    side: BorderSide(
-                      color: _catFiltre == cat
-                          ? (_catColors[cat] ?? Colors.grey)
-                          : Colors.grey.shade300,
-                    ),
-                    onSelected: (_) => setState(() => _catFiltre = cat),
-                  ),
-                )),
-                const Spacer(),
-                // Compteur global
-                _compteurGlobal(poulesCat, arbreCat),
-              ],
-            ),
-          ),
-
-          // ── Sous-onglets Poules / Phase finale ────────────────────────────
-          Container(
-            color: Colors.white,
-            child: TabBar(
-              controller: _tabController,
-              labelColor: catColor,
-              unselectedLabelColor: Colors.grey,
-              indicatorColor: catColor,
-              indicatorWeight: 2,
-              tabs: [
-                Tab(
-                  child: Row(
-                    mainAxisSize: MainAxisSize.min,
-                    children: [
-                      const Icon(Icons.grid_view_rounded, size: 15),
-                      const SizedBox(width: 6),
-                      const Text('Poules', style: TextStyle(fontSize: 12)),
-                      const SizedBox(width: 6),
-                      _progressBadge(poulesCat, catColor),
-                    ],
-                  ),
+      body: Column(children: [
+        // ── Filtre catégorie ────────────────────────────────────────────────
+        Container(
+          color: Colors.white,
+          padding: const EdgeInsets.fromLTRB(16, 10, 16, 10),
+          child: Row(children: [
+            const Text('Catégorie :',
+                style: TextStyle(fontSize: 12, fontWeight: FontWeight.w600, color: Colors.grey)),
+            const SizedBox(width: 10),
+            ..._categories.map((cat) => Padding(
+              padding: const EdgeInsets.only(right: 8),
+              child: ChoiceChip(
+                label: Text(cat, style: const TextStyle(fontSize: 11)),
+                selected: _catFiltre == cat,
+                selectedColor: (_catColors[cat] ?? Colors.grey).withOpacity(0.15),
+                labelStyle: TextStyle(
+                  color: _catFiltre == cat ? (_catColors[cat] ?? Colors.grey) : Colors.grey,
+                  fontWeight: _catFiltre == cat ? FontWeight.w700 : FontWeight.normal,
                 ),
-                Tab(
-                  child: Row(
-                    mainAxisSize: MainAxisSize.min,
-                    children: [
-                      const Icon(Icons.account_tree_rounded, size: 15),
-                      const SizedBox(width: 6),
-                      const Text('Phase finale', style: TextStyle(fontSize: 12)),
-                      const SizedBox(width: 6),
-                      _progressBadge(arbreCat, const Color(0xFF8B6914)),
-                    ],
-                  ),
+                side: BorderSide(
+                  color: _catFiltre == cat ? (_catColors[cat] ?? Colors.grey) : Colors.grey.shade300,
                 ),
-              ],
-            ),
-          ),
-          const Divider(height: 1),
+                onSelected: (_) => setState(() => _catFiltre = cat),
+              ),
+            )),
+            const Spacer(),
+            _compteurGlobal(poulesCat, arbreCat, consolanteCat),
+          ]),
+        ),
 
-          // ── Corps ─────────────────────────────────────────────────────────
-          Expanded(
-            child: _chargement
-                ? Center(child: CircularProgressIndicator(color: catColor))
-                : _erreur != null
-                ? _buildErreur()
-                : TabBarView(
-              controller: _tabController,
-              children: [
-                _buildPoules(poulesCat, catColor),
-                _buildArbre(arbreCat, catColor),
-              ],
-            ),
+        // ── Sous-onglets ────────────────────────────────────────────────────
+        Container(
+          color: Colors.white,
+          child: TabBar(
+            controller: _tabController,
+            labelColor: catColor,
+            unselectedLabelColor: Colors.grey,
+            indicatorColor: catColor,
+            indicatorWeight: 2,
+            tabs: [
+              Tab(child: Row(mainAxisSize: MainAxisSize.min, children: [
+                const Icon(Icons.grid_view_rounded, size: 15),
+                const SizedBox(width: 6),
+                const Text('Poules', style: TextStyle(fontSize: 12)),
+                const SizedBox(width: 6),
+                _progressBadge(poulesCat, catColor),
+              ])),
+              Tab(child: Row(mainAxisSize: MainAxisSize.min, children: [
+                const Icon(Icons.account_tree_rounded, size: 15),
+                const SizedBox(width: 6),
+                const Text('Phase finale', style: TextStyle(fontSize: 12)),
+                const SizedBox(width: 6),
+                _progressBadge(arbreCat, const Color(0xFF8B6914)),
+              ])),
+              Tab(child: Row(mainAxisSize: MainAxisSize.min, children: [
+                const Icon(Icons.emoji_events_outlined, size: 15),
+                const SizedBox(width: 6),
+                const Text('Consolantes', style: TextStyle(fontSize: 12)),
+                const SizedBox(width: 6),
+                _progressBadge(consolanteCat, const Color(0xFFD47A1A)),
+              ])),
+            ],
           ),
-        ],
-      ),
+        ),
+        const Divider(height: 1),
+
+        // ── Corps ───────────────────────────────────────────────────────────
+        Expanded(
+          child: _chargement
+              ? Center(child: CircularProgressIndicator(color: catColor))
+              : _erreur != null
+              ? _buildErreur()
+              : TabBarView(
+            controller: _tabController,
+            children: [
+              _buildPoules(poulesCat, catColor),
+              _buildArbre(arbreCat, catColor),
+              _buildConsolantes(consolanteCat, catColor),
+            ],
+          ),
+        ),
+      ]),
     );
   }
 
   Widget _compteurGlobal(
       List<Map<String, dynamic>> poules,
       List<Map<String, dynamic>> arbre,
+      List<Map<String, dynamic>> consolantes,
       ) {
-    final total    = poules.length + arbre.length;
-    final termines = poules.where(_estTermine).length + arbre.where(_estTermine).length;
+    final total    = poules.length + arbre.length + consolantes.length;
+    final termines = poules.where(_estTermine).length
+        + arbre.where(_estTermine).length
+        + consolantes.where(_estTermine).length;
     return Container(
       padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 4),
-      decoration: BoxDecoration(
-        color: Colors.grey.shade100,
-        borderRadius: BorderRadius.circular(12),
-      ),
+      decoration: BoxDecoration(color: Colors.grey.shade100, borderRadius: BorderRadius.circular(12)),
       child: Text('$termines / $total matchs joués',
           style: TextStyle(fontSize: 11, fontWeight: FontWeight.w600, color: Colors.grey.shade700)),
     );
   }
 
   Widget _buildErreur() => Center(
-    child: Column(
-      mainAxisSize: MainAxisSize.min,
-      children: [
-        const Icon(Icons.wifi_off, size: 40, color: Color(0xFFE57373)),
-        const SizedBox(height: 12),
-        Text(_erreur!, textAlign: TextAlign.center, style: const TextStyle(color: Colors.grey)),
-        const SizedBox(height: 16),
-        TextButton(onPressed: _charger, child: const Text('Réessayer')),
-      ],
-    ),
+    child: Column(mainAxisSize: MainAxisSize.min, children: [
+      const Icon(Icons.wifi_off, size: 40, color: Color(0xFFE57373)),
+      const SizedBox(height: 12),
+      Text(_erreur!, textAlign: TextAlign.center, style: const TextStyle(color: Colors.grey)),
+      const SizedBox(height: 16),
+      TextButton(onPressed: _charger, child: const Text('Réessayer')),
+    ]),
   );
 
   // ── Section Poules ─────────────────────────────────────────────────────────
   Widget _buildPoules(List<Map<String, dynamic>> matchs, Color catColor) {
     if (matchs.isEmpty) return _emptyState('Aucun match de poule pour $_catFiltre');
 
-    // Grouper par poule
     final Map<String, List<Map<String, dynamic>>> parPoule = {};
     for (final m in matchs) {
       final p = m['Poule']?.toString() ?? '?';
@@ -339,9 +347,9 @@ class _ArbitragePageState extends State<ArbitragePage>
     return ListView(
       padding: const EdgeInsets.fromLTRB(16, 12, 16, 24),
       children: parPoule.entries.map((entry) {
-        final poule   = entry.key;
-        final mPoule  = entry.value;
-        final termines = mPoule.where(_estTermine).length;
+        final poule         = entry.key;
+        final mPoule        = entry.value;
+        final termines      = mPoule.where(_estTermine).length;
         final pouleTerminee = termines == mPoule.length && mPoule.isNotEmpty;
 
         return Container(
@@ -353,70 +361,56 @@ class _ArbitragePageState extends State<ArbitragePage>
               color: pouleTerminee ? catColor.withOpacity(0.5) : Colors.grey.shade200,
               width: pouleTerminee ? 1.5 : 1,
             ),
-            boxShadow: [
-              BoxShadow(color: catColor.withOpacity(0.06), blurRadius: 8, offset: const Offset(0, 2)),
-            ],
+            boxShadow: [BoxShadow(color: catColor.withOpacity(0.06), blurRadius: 8, offset: const Offset(0, 2))],
           ),
-          child: Column(
-            crossAxisAlignment: CrossAxisAlignment.stretch,
-            children: [
-              // En-tête poule
-              Container(
-                padding: const EdgeInsets.fromLTRB(14, 10, 14, 10),
-                decoration: BoxDecoration(
-                  color: _catFond[_catFiltre] ?? const Color(0xFFF0F0F0),
-                  borderRadius: const BorderRadius.vertical(top: Radius.circular(12)),
-                  border: Border(bottom: BorderSide(color: catColor.withOpacity(0.2))),
-                ),
-                child: Row(
-                  children: [
-                    Container(
-                      width: 28, height: 28,
-                      decoration: BoxDecoration(
-                        color: pouleTerminee ? catColor : catColor.withOpacity(0.7),
-                        borderRadius: BorderRadius.circular(7),
-                      ),
-                      alignment: Alignment.center,
-                      child: Text(poule, style: const TextStyle(
-                          color: Colors.white, fontWeight: FontWeight.w900, fontSize: 13)),
-                    ),
-                    const SizedBox(width: 10),
-                    Text('Poule $poule · $_catFiltre',
-                        style: TextStyle(fontWeight: FontWeight.w700, fontSize: 13, color: catColor)),
-                    if (pouleTerminee) ...[
-                      const SizedBox(width: 8),
-                      Icon(Icons.check_circle, size: 14, color: catColor),
-                    ],
-                    const Spacer(),
-                    SizedBox(
-                      width: 60,
-                      child: ClipRRect(
-                        borderRadius: BorderRadius.circular(4),
-                        child: LinearProgressIndicator(
-                          value: mPoule.isEmpty ? 0 : termines / mPoule.length,
-                          backgroundColor: Colors.grey.shade200,
-                          color: catColor,
-                          minHeight: 5,
-                        ),
-                      ),
-                    ),
-                    const SizedBox(width: 8),
-                    Text('$termines/${mPoule.length}',
-                        style: TextStyle(fontSize: 11, color: catColor.withOpacity(0.8))),
-                  ],
-                ),
+          child: Column(crossAxisAlignment: CrossAxisAlignment.stretch, children: [
+            Container(
+              padding: const EdgeInsets.fromLTRB(14, 10, 14, 10),
+              decoration: BoxDecoration(
+                color: _catFond[_catFiltre] ?? const Color(0xFFF0F0F0),
+                borderRadius: const BorderRadius.vertical(top: Radius.circular(12)),
+                border: Border(bottom: BorderSide(color: catColor.withOpacity(0.2))),
               ),
-              // Lignes de matchs
-              ...mPoule.asMap().entries.map((e) => _MatchLigne(
-                match: e.value,
-                isLast: e.key == mPoule.length - 1,
-                catColor: catColor,
-                formatDate: _formatDate,
-                estTermine: _estTermine,
-                onTap: _ouvrirMatch,
-              )),
-            ],
-          ),
+              child: Row(children: [
+                Container(
+                  width: 28, height: 28,
+                  decoration: BoxDecoration(
+                    color: pouleTerminee ? catColor : catColor.withOpacity(0.7),
+                    borderRadius: BorderRadius.circular(7),
+                  ),
+                  alignment: Alignment.center,
+                  child: Text(poule, style: const TextStyle(color: Colors.white, fontWeight: FontWeight.w900, fontSize: 13)),
+                ),
+                const SizedBox(width: 10),
+                Text('Poule $poule · $_catFiltre',
+                    style: TextStyle(fontWeight: FontWeight.w700, fontSize: 13, color: catColor)),
+                if (pouleTerminee) ...[
+                  const SizedBox(width: 8),
+                  Icon(Icons.check_circle, size: 14, color: catColor),
+                ],
+                const Spacer(),
+                SizedBox(
+                  width: 60,
+                  child: ClipRRect(
+                    borderRadius: BorderRadius.circular(4),
+                    child: LinearProgressIndicator(
+                      value: mPoule.isEmpty ? 0 : termines / mPoule.length,
+                      backgroundColor: Colors.grey.shade200,
+                      color: catColor, minHeight: 5,
+                    ),
+                  ),
+                ),
+                const SizedBox(width: 8),
+                Text('$termines/${mPoule.length}',
+                    style: TextStyle(fontSize: 11, color: catColor.withOpacity(0.8))),
+              ]),
+            ),
+            ...mPoule.asMap().entries.map((e) => _MatchLigne(
+              match: e.value, isLast: e.key == mPoule.length - 1,
+              catColor: catColor, formatDate: _formatDate,
+              estTermine: _estTermine, onTap: _ouvrirMatch,
+            )),
+          ]),
         );
       }).toList(),
     );
@@ -428,8 +422,30 @@ class _ArbitragePageState extends State<ArbitragePage>
       return _emptyState(
           'Aucun match de phase finale pour $_catFiltre\n(les équipes seront attribuées après les poules)');
     }
+    return _buildGroupesParNiveau(matchs, catColor, _phases, _phaseColor);
+  }
 
-    // Grouper par niveau
+  // ── Section Consolantes ────────────────────────────────────────────────────
+  Widget _buildConsolantes(List<Map<String, dynamic>> matchs, Color catColor) {
+    if (_catFiltre == 'RF') {
+      return _emptyState('Pas de consolante pour la catégorie RF');
+    }
+    if (matchs.isEmpty) {
+      return _emptyState(
+          'Aucun match de consolante pour $_catFiltre\n'
+              '(les équipes seront attribuées après les poules)');
+    }
+    return _buildGroupesParNiveau(matchs, catColor, _phasesConsolante, _phaseColorConsolante);
+  }
+
+  /// Méthode partagée : groupe les matchs par Niveau et construit les cartes.
+  /// Utilisée par _buildArbre et _buildConsolantes.
+  Widget _buildGroupesParNiveau(
+      List<Map<String, dynamic>> matchs,
+      Color catColor,
+      Map<String, String> labels,
+      Color Function(String) colorFn,
+      ) {
     final Map<String, List<Map<String, dynamic>>> parNiveau = {};
     for (final m in matchs) {
       final n = m['Niveau']?.toString() ?? '?';
@@ -445,10 +461,10 @@ class _ArbitragePageState extends State<ArbitragePage>
     return ListView(
       padding: const EdgeInsets.fromLTRB(16, 12, 16, 24),
       children: niveaux.map((niveau) {
-        final mNiveau  = parNiveau[niveau]!;
-        final phase    = _phases[niveau] ?? 'Phase $niveau';
-        final termines = mNiveau.where(_estTermine).length;
-        final phaseColor = _phaseColor(niveau);
+        final mNiveau   = parNiveau[niveau]!;
+        final phase     = labels[niveau] ?? 'Phase $niveau';
+        final termines  = mNiveau.where(_estTermine).length;
+        final phaseColor = colorFn(niveau);
 
         return Container(
           margin: const EdgeInsets.only(bottom: 14),
@@ -456,71 +472,54 @@ class _ArbitragePageState extends State<ArbitragePage>
             color: Colors.white,
             borderRadius: BorderRadius.circular(12),
             border: Border.all(color: phaseColor.withOpacity(0.3)),
-            boxShadow: [
-              BoxShadow(color: phaseColor.withOpacity(0.08), blurRadius: 8, offset: const Offset(0, 2)),
-            ],
+            boxShadow: [BoxShadow(color: phaseColor.withOpacity(0.08), blurRadius: 8, offset: const Offset(0, 2))],
           ),
-          child: Column(
-            crossAxisAlignment: CrossAxisAlignment.stretch,
-            children: [
-              // En-tête phase
-              Container(
-                padding: const EdgeInsets.fromLTRB(14, 10, 14, 10),
-                decoration: BoxDecoration(
-                  color: phaseColor.withOpacity(0.08),
-                  borderRadius: const BorderRadius.vertical(top: Radius.circular(12)),
-                  border: Border(bottom: BorderSide(color: phaseColor.withOpacity(0.2))),
-                ),
-                child: Row(
-                  children: [
-                    Container(
-                      padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 5),
-                      decoration: BoxDecoration(
-                        color: phaseColor,
-                        borderRadius: BorderRadius.circular(8),
-                      ),
-                      child: Text(phase, style: const TextStyle(
-                          color: Colors.white, fontWeight: FontWeight.w800, fontSize: 12)),
-                    ),
-                    const SizedBox(width: 10),
-                    _badgeCat(_catFiltre),
-                    const Spacer(),
-                    Text('$termines/${mNiveau.length}',
-                        style: TextStyle(fontSize: 11, color: phaseColor)),
-                    const SizedBox(width: 8),
-                    SizedBox(
-                      width: 50,
-                      child: ClipRRect(
-                        borderRadius: BorderRadius.circular(4),
-                        child: LinearProgressIndicator(
-                          value: mNiveau.isEmpty ? 0 : termines / mNiveau.length,
-                          backgroundColor: Colors.grey.shade200,
-                          color: phaseColor,
-                          minHeight: 5,
-                        ),
-                      ),
-                    ),
-                  ],
-                ),
+          child: Column(crossAxisAlignment: CrossAxisAlignment.stretch, children: [
+            Container(
+              padding: const EdgeInsets.fromLTRB(14, 10, 14, 10),
+              decoration: BoxDecoration(
+                color: phaseColor.withOpacity(0.08),
+                borderRadius: const BorderRadius.vertical(top: Radius.circular(12)),
+                border: Border(bottom: BorderSide(color: phaseColor.withOpacity(0.2))),
               ),
-              // Lignes de matchs
-              ...mNiveau.asMap().entries.map((e) => _MatchLigne(
-                match: e.value,
-                isLast: e.key == mNiveau.length - 1,
-                catColor: phaseColor,
-                formatDate: _formatDate,
-                estTermine: _estTermine,
-                onTap: _ouvrirMatch,
-                isArbre: true,
-                phase: phase,
-              )),
-            ],
-          ),
+              child: Row(children: [
+                Container(
+                  padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 5),
+                  decoration: BoxDecoration(color: phaseColor, borderRadius: BorderRadius.circular(8)),
+                  child: Text(phase, style: const TextStyle(
+                      color: Colors.white, fontWeight: FontWeight.w800, fontSize: 12)),
+                ),
+                const SizedBox(width: 10),
+                _badgeCat(_catFiltre),
+                const Spacer(),
+                Text('$termines/${mNiveau.length}', style: TextStyle(fontSize: 11, color: phaseColor)),
+                const SizedBox(width: 8),
+                SizedBox(
+                  width: 50,
+                  child: ClipRRect(
+                    borderRadius: BorderRadius.circular(4),
+                    child: LinearProgressIndicator(
+                      value: mNiveau.isEmpty ? 0 : termines / mNiveau.length,
+                      backgroundColor: Colors.grey.shade200,
+                      color: phaseColor, minHeight: 5,
+                    ),
+                  ),
+                ),
+              ]),
+            ),
+            ...mNiveau.asMap().entries.map((e) => _MatchLigne(
+              match: e.value, isLast: e.key == mNiveau.length - 1,
+              catColor: phaseColor, formatDate: _formatDate,
+              estTermine: _estTermine, onTap: _ouvrirMatch,
+              isArbre: true, phase: phase,
+            )),
+          ]),
         );
       }).toList(),
     );
   }
 
+  // ── Couleurs de phases ─────────────────────────────────────────────────────
   Color _phaseColor(String niveau) {
     switch (niveau) {
       case '1': return const Color(0xFF5B8FCC);
@@ -531,20 +530,27 @@ class _ArbitragePageState extends State<ArbitragePage>
     }
   }
 
+  /// Palette distincte pour les consolantes — tons orangés/ambrés
+  Color _phaseColorConsolante(String niveau) {
+    switch (niveau) {
+      case '1': return const Color(0xFFD47A1A); // Quart — orange
+      case '2': return const Color(0xFFB5600A); // Demi — orange foncé
+      case '3': return const Color(0xFF8B4513); // Finale — brun
+      default:  return Colors.grey;
+    }
+  }
+
   Widget _emptyState(String msg) => Center(
-    child: Column(
-      mainAxisSize: MainAxisSize.min,
-      children: [
-        Icon(Icons.sports_rugby, size: 48, color: Colors.grey.shade300),
-        const SizedBox(height: 12),
-        Text(msg, textAlign: TextAlign.center,
-            style: TextStyle(color: Colors.grey.shade500, height: 1.5)),
-      ],
-    ),
+    child: Column(mainAxisSize: MainAxisSize.min, children: [
+      Icon(Icons.sports_rugby, size: 48, color: Colors.grey.shade300),
+      const SizedBox(height: 12),
+      Text(msg, textAlign: TextAlign.center,
+          style: TextStyle(color: Colors.grey.shade500, height: 1.5)),
+    ]),
   );
 }
 
-// ─── Ligne d'un match ─────────────────────────────────────────────────────────
+// ─── Ligne d'un match (inchangée) ─────────────────────────────────────────────
 class _MatchLigne extends StatelessWidget {
   final Map<String, dynamic> match;
   final bool isLast;
@@ -587,139 +593,104 @@ class _MatchLigne extends StatelessWidget {
         padding: const EdgeInsets.fromLTRB(16, 10, 16, 10),
         decoration: BoxDecoration(
           color: termine ? catColor.withOpacity(0.03) : Colors.white,
-          border: isLast
-              ? null
-              : Border(bottom: BorderSide(color: Colors.grey.shade100)),
+          border: isLast ? null : Border(bottom: BorderSide(color: Colors.grey.shade100)),
         ),
-        child: Row(
-          children: [
-            // ID
-            SizedBox(
-              width: 28,
-              child: Text('#${match["id"]}',
-                  style: TextStyle(fontSize: 10, fontFamily: 'monospace', color: Colors.grey.shade400)),
-            ),
-
-            // Phase badge (arbre uniquement)
-            if (isArbre && phase != null) ...[
-              Container(
-                padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 2),
-                decoration: BoxDecoration(
-                  color: catColor.withOpacity(0.1),
-                  borderRadius: BorderRadius.circular(4),
-                ),
-                child: Text(phase!, style: TextStyle(fontSize: 9, color: catColor, fontWeight: FontWeight.w700)),
+        child: Row(children: [
+          SizedBox(
+            width: 28,
+            child: Text('#${match["id"]}',
+                style: TextStyle(fontSize: 10, fontFamily: 'monospace', color: Colors.grey.shade400)),
+          ),
+          if (isArbre && phase != null) ...[
+            Container(
+              padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 2),
+              decoration: BoxDecoration(
+                color: catColor.withOpacity(0.1), borderRadius: BorderRadius.circular(4),
               ),
-              const SizedBox(width: 8),
-            ],
-
-            // Équipes + score
-            Expanded(
-              flex: 5,
-              child: Row(
-                children: [
-                  Expanded(
-                    child: Text(
-                      eq1.isEmpty ? '(À définir)' : eq1,
-                      textAlign: TextAlign.right,
-                      style: TextStyle(
-                        fontSize: 12,
-                        fontWeight: eq1Win ? FontWeight.w700 : FontWeight.w500,
-                        color: eq1.isEmpty
-                            ? Colors.grey.shade400
-                            : eq1Win ? catColor : const Color(0xFF1A1A1A),
-                        fontStyle: eq1.isEmpty ? FontStyle.italic : FontStyle.normal,
-                      ),
-                      overflow: TextOverflow.ellipsis,
-                    ),
-                  ),
-                  Container(
-                    margin: const EdgeInsets.symmetric(horizontal: 8),
-                    padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 4),
-                    decoration: BoxDecoration(
-                      color: termine ? catColor.withOpacity(0.1) : Colors.grey.shade100,
-                      borderRadius: BorderRadius.circular(6),
-                    ),
-                    child: Text(
-                      termine ? '$score1 – $score2' : 'vs',
-                      style: TextStyle(
-                        fontSize: 12, fontWeight: FontWeight.w800,
-                        color: termine ? catColor : Colors.grey,
-                      ),
-                    ),
-                  ),
-                  Expanded(
-                    child: Text(
-                      eq2.isEmpty ? '(À définir)' : eq2,
-                      style: TextStyle(
-                        fontSize: 12,
-                        fontWeight: eq2Win ? FontWeight.w700 : FontWeight.w500,
-                        color: eq2.isEmpty
-                            ? Colors.grey.shade400
-                            : eq2Win ? catColor : const Color(0xFF1A1A1A),
-                        fontStyle: eq2.isEmpty ? FontStyle.italic : FontStyle.normal,
-                      ),
-                      overflow: TextOverflow.ellipsis,
-                    ),
-                  ),
-                ],
-              ),
+              child: Text(phase!, style: TextStyle(fontSize: 9, color: catColor, fontWeight: FontWeight.w700)),
             ),
-
             const SizedBox(width: 8),
-
-            // Horaire
+          ],
+          Expanded(
+            flex: 5,
+            child: Row(children: [
+              Expanded(
+                child: Text(
+                  eq1.isEmpty ? '(À définir)' : eq1,
+                  textAlign: TextAlign.right,
+                  style: TextStyle(
+                    fontSize: 12,
+                    fontWeight: eq1Win ? FontWeight.w700 : FontWeight.w500,
+                    color: eq1.isEmpty ? Colors.grey.shade400 : eq1Win ? catColor : const Color(0xFF1A1A1A),
+                    fontStyle: eq1.isEmpty ? FontStyle.italic : FontStyle.normal,
+                  ),
+                  overflow: TextOverflow.ellipsis,
+                ),
+              ),
+              Container(
+                margin: const EdgeInsets.symmetric(horizontal: 8),
+                padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 4),
+                decoration: BoxDecoration(
+                  color: termine ? catColor.withOpacity(0.1) : Colors.grey.shade100,
+                  borderRadius: BorderRadius.circular(6),
+                ),
+                child: Text(
+                  termine ? '$score1 – $score2' : 'vs',
+                  style: TextStyle(fontSize: 12, fontWeight: FontWeight.w800,
+                      color: termine ? catColor : Colors.grey),
+                ),
+              ),
+              Expanded(
+                child: Text(
+                  eq2.isEmpty ? '(À définir)' : eq2,
+                  style: TextStyle(
+                    fontSize: 12,
+                    fontWeight: eq2Win ? FontWeight.w700 : FontWeight.w500,
+                    color: eq2.isEmpty ? Colors.grey.shade400 : eq2Win ? catColor : const Color(0xFF1A1A1A),
+                    fontStyle: eq2.isEmpty ? FontStyle.italic : FontStyle.normal,
+                  ),
+                  overflow: TextOverflow.ellipsis,
+                ),
+              ),
+            ]),
+          ),
+          const SizedBox(width: 8),
+          Expanded(
+            flex: 2,
+            child: Row(children: [
+              const Icon(Icons.schedule, size: 12, color: Colors.grey),
+              const SizedBox(width: 4),
+              Expanded(
+                child: Text(formatDate(match['Start']?.toString()),
+                    style: const TextStyle(fontSize: 11, color: Colors.grey),
+                    overflow: TextOverflow.ellipsis),
+              ),
+            ]),
+          ),
+          if (terrain.isNotEmpty) ...[
+            const SizedBox(width: 6),
             Expanded(
               flex: 2,
-              child: Row(
-                children: [
-                  const Icon(Icons.schedule, size: 12, color: Colors.grey),
-                  const SizedBox(width: 4),
-                  Expanded(
-                    child: Text(
-                      formatDate(match['Start']?.toString()),
-                      style: const TextStyle(fontSize: 11, color: Colors.grey),
-                      overflow: TextOverflow.ellipsis,
-                    ),
-                  ),
-                ],
-              ),
-            ),
-
-            // Terrain
-            if (terrain.isNotEmpty) ...[
-              const SizedBox(width: 6),
-              Expanded(
-                flex: 2,
-                child: Row(
-                  children: [
-                    const Icon(Icons.location_on_outlined, size: 12, color: Colors.grey),
-                    const SizedBox(width: 4),
-                    Expanded(
-                      child: Text(terrain,
-                          style: TextStyle(fontSize: 11, color: Colors.grey.shade700),
-                          overflow: TextOverflow.ellipsis),
-                    ),
-                  ],
+              child: Row(children: [
+                const Icon(Icons.location_on_outlined, size: 12, color: Colors.grey),
+                const SizedBox(width: 4),
+                Expanded(
+                  child: Text(terrain,
+                      style: TextStyle(fontSize: 11, color: Colors.grey.shade700),
+                      overflow: TextOverflow.ellipsis),
                 ),
-              ),
-            ],
-
-            const SizedBox(width: 8),
-
-            // Statut
-            _statutBadge(match, termine, catColor),
-
-            const SizedBox(width: 8),
-
-            // Icône action
-            Icon(
-              termine ? Icons.sports_score_rounded : Icons.play_arrow_rounded,
-              size: 18,
-              color: termine ? catColor.withOpacity(0.5) : catColor,
+              ]),
             ),
           ],
-        ),
+          const SizedBox(width: 8),
+          _statutBadge(match, termine, catColor),
+          const SizedBox(width: 8),
+          Icon(
+            termine ? Icons.sports_score_rounded : Icons.play_arrow_rounded,
+            size: 18,
+            color: termine ? catColor.withOpacity(0.5) : catColor,
+          ),
+        ]),
       ),
     );
   }
@@ -729,8 +700,7 @@ class _MatchLigne extends StatelessWidget {
       return Container(
         padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 2),
         decoration: BoxDecoration(
-          color: const Color(0xFFE8F5EC),
-          borderRadius: BorderRadius.circular(4),
+          color: const Color(0xFFE8F5EC), borderRadius: BorderRadius.circular(4),
           border: Border.all(color: const Color(0xFF2D9148).withOpacity(0.4)),
         ),
         child: const Text('Terminé',
@@ -742,8 +712,7 @@ class _MatchLigne extends StatelessWidget {
       return Container(
         padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 2),
         decoration: BoxDecoration(
-          color: const Color(0xFFFFF3CD),
-          borderRadius: BorderRadius.circular(4),
+          color: const Color(0xFFFFF3CD), borderRadius: BorderRadius.circular(4),
           border: Border.all(color: Colors.orange.withOpacity(0.4)),
         ),
         child: const Text('Sans horaire',
@@ -753,8 +722,7 @@ class _MatchLigne extends StatelessWidget {
     return Container(
       padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 2),
       decoration: BoxDecoration(
-        color: catColor.withOpacity(0.08),
-        borderRadius: BorderRadius.circular(4),
+        color: catColor.withOpacity(0.08), borderRadius: BorderRadius.circular(4),
         border: Border.all(color: catColor.withOpacity(0.3)),
       ),
       child: Text('Arbitrer',

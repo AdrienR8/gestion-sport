@@ -1,15 +1,16 @@
 // lib/pages/arbitrage_match_page.dart
 //
-// Étape 2 v2 — sans QuickAlert, sans import match_sheet_generator externe
+// MODIFICATIONS v3 — Support des consolantes
 //
-// REMPLACEMENTS QuickAlert :
-//   • Confirmations légères (essai, transformation, pénalité, forfait,
-//     informations mises à jour, cartons) → SnackBar flottant coloré
-//   • Actions importantes (gagnant, égalité, poule terminée, meilleurs
-//     troisièmes, signatures manquantes, PDF généré, erreur) → AlertDialog natif
-//
-// IMPORTS supprimés : quickalert
-// match_sheet_generator.dart doit être cloné dans ce projet séparément.
+// CHANGEMENTS :
+//   • _tableMatch : nouveau cas 'consolante' → 'Consolante{CodeCategorie}'
+//   • _estMatchPoule : consolante retourne false
+//   • _estConsolante : nouveau getter
+//   • _gagnant() : bloc else unifié — utilise _tableMatch pour la propagation
+//     (fonctionne pour arbre ET consolante sans duplication de code)
+//   • _passagePouleACompetition() : ajout du peuplement des consolantes
+//     (4ᵉ de chaque poule + 2 pires troisièmes)
+//   • _piresTroisiemes() : nouvelle méthode analogue à _mt() pour les consolantes
 
 import 'dart:convert';
 import 'dart:typed_data';
@@ -66,6 +67,21 @@ class _ArbitrageMatchPageState extends State<ArbitrageMatchPage> {
     }
   }
 
+  // ── Getters table ──────────────────────────────────────────────────────────
+  bool get _estConsolante =>
+      widget.match['tableType']?.toString() == 'consolante';
+
+  bool get _estMatchPoule =>
+      widget.match.containsKey('Poule') && !_estConsolante;
+
+  /// Retourne le nom exact de la table Supabase à écrire.
+  String get _tableMatch {
+    final cat = widget.match['CodeCategorie']?.toString() ?? '';
+    if (_estConsolante)  return 'Consolante$cat';
+    if (_estMatchPoule)  return 'Poule$cat';
+    return cat; // arbre principal
+  }
+
   @override
   void initState() {
     super.initState();
@@ -91,10 +107,8 @@ class _ArbitrageMatchPageState extends State<ArbitrageMatchPage> {
   }
 
   // ══════════════════════════════════════════════════════════════════════════
-  // NOTIFICATIONS — remplaçants de QuickAlert
+  // NOTIFICATIONS
   // ══════════════════════════════════════════════════════════════════════════
-
-  // SnackBar flottant — confirmations légères
   void _snack(String msg, {Color color = const Color(0xFF2D9148), IconData icon = Icons.check_circle_outline}) {
     if (!mounted) return;
     ScaffoldMessenger.of(context).clearSnackBars();
@@ -115,7 +129,6 @@ class _ArbitrageMatchPageState extends State<ArbitrageMatchPage> {
   void _snackSuccess(String msg) => _snack(msg, color: const Color(0xFF2D9148), icon: Icons.check_circle_outline);
   void _snackInfo(String msg)    => _snack(msg, color: const Color(0xFF1A4A7A), icon: Icons.info_outline);
 
-  // AlertDialog natif — actions importantes
   Future<void> _alert(String titre, String message, {Color? couleur}) async {
     if (!mounted) return;
     final c = couleur ?? _catColor;
@@ -204,16 +217,6 @@ class _ArbitrageMatchPageState extends State<ArbitrageMatchPage> {
   }
 
   // ══════════════════════════════════════════════════════════════════════════
-  // HELPERS TABLE
-  // ══════════════════════════════════════════════════════════════════════════
-  String get _tableMatch {
-    final poule = widget.match.containsKey('Poule') ? 'Poule' : '';
-    return '$poule${widget.match["CodeCategorie"]}';
-  }
-
-  bool get _estMatchPoule => widget.match.containsKey('Poule');
-
-  // ══════════════════════════════════════════════════════════════════════════
   // MODIFICATION SCORE
   // ══════════════════════════════════════════════════════════════════════════
   Future<void> _modifScore(String? score1, String? score2) async {
@@ -248,7 +251,7 @@ class _ArbitrageMatchPageState extends State<ArbitrageMatchPage> {
     int score = int.tryParse(_dataMatch['Score$equipe'] ?? '0') ?? 0;
 
     switch (action) {
-      case 1: // Essai +5
+      case 1:
         score += 5;
         if (equipe == 1) await _modifScore(score.toString(), _dataMatch['Score2']);
         else              await _modifScore(_dataMatch['Score1'], score.toString());
@@ -261,7 +264,7 @@ class _ArbitrageMatchPageState extends State<ArbitrageMatchPage> {
         });
         _snackSuccess("Essai ! Total essais : ${nbEssai + 1}");
 
-      case 2: // Transformation +2
+      case 2:
         score += 2;
         if (equipe == 1) await _modifScore(score.toString(), widget.match['Score2']);
         else              await _modifScore(widget.match['Score1'], score.toString());
@@ -274,7 +277,7 @@ class _ArbitrageMatchPageState extends State<ArbitrageMatchPage> {
       case 6:
         _snackInfo('Forfait déclaré');
 
-      case 7: // Pénalité +3
+      case 7:
         score += 3;
         if (equipe == 1) await _modifScore(score.toString(), _dataMatch['Score2']);
         else              await _modifScore(_dataMatch['Score1'], score.toString());
@@ -300,7 +303,6 @@ class _ArbitrageMatchPageState extends State<ArbitrageMatchPage> {
     final selection = await _dialogSelectionJoueur(joueurs: joueurs, typeCarton: typeCarton, nomEquipe: nomEquipe);
 
     if (selection == null) {
-      // Annulé → rollback
       await _supabase.from(_tableMatch).update({'$champ$equipe': valActuelle.toString()}).eq('id', widget.match['id']);
       setState(() {
         widget.match['$champ$equipe'] = valActuelle.toString();
@@ -332,7 +334,6 @@ class _ArbitrageMatchPageState extends State<ArbitrageMatchPage> {
     final liste  = equipe == 1 ? _cartonsEquipe1 : _cartonsEquipe2;
     setState(() => liste.add({'id': idJoueur, 'nom': nomJoueur, 'motif': motif, 'type': typeCarton}));
 
-    // SnackBar coloré selon type
     final cartonColor = typeCarton == 'jaune' ? const Color(0xFFD4A017)
         : typeCarton == 'rouge' ? const Color(0xFFE53E3E)
         : const Color(0xFF1A4A7A);
@@ -476,8 +477,7 @@ class _ArbitrageMatchPageState extends State<ArbitrageMatchPage> {
     String equipePerdante = '';
 
     if (_estMatchPoule) {
-      // Lire les scores réels depuis la DB — _dataMatch peut être vide
-      // si les scores n'ont pas été modifiés pendant cette session.
+      // ── Match de poule ──────────────────────────────────────────────────
       final matchDB = await _supabase.from(_tableMatch)
           .select('Score1, Score2').eq('id', widget.match['id']).single();
       final s1DB = int.tryParse(matchDB['Score1']?.toString() ?? '0') ?? 0;
@@ -505,7 +505,10 @@ class _ArbitrageMatchPageState extends State<ArbitrageMatchPage> {
 
       equipePerdante = equipe == widget.match['CodeEquipe1'].toString()
           ? widget.match['CodeEquipe2'].toString() : widget.match['CodeEquipe1'].toString();
+
     } else {
+      // ── Arbre principal OU Consolante — logique identique ───────────────
+      // _tableMatch pointe déjà vers la bonne table (cat ou ConsolateCat).
       var idMatch = int.parse(codeMatch.substring(1));
       String codeEquipeSuivant;
       String equipeSuivante;
@@ -519,10 +522,17 @@ class _ArbitrageMatchPageState extends State<ArbitrageMatchPage> {
       idMatch = (idMatch / 2).ceil();
       final codeSuivant    = (int.parse(codeMatch.substring(0, 1)) + 1).ceil();
       final idMatchSuivant = '$codeSuivant$idMatch';
-      await _supabase.from(widget.match['CodeCategorie']).update({'Gagnant': codeEquipe}).eq('id', widget.match['id']);
-      await _supabase.from(widget.match['CodeCategorie']).update({equipeSuivante: nomEquipe}).eq('id', idMatchSuivant);
-      await _supabase.from(widget.match['CodeCategorie']).update({codeEquipeSuivant: codeEquipe}).eq('id', idMatchSuivant);
-      _snackSuccess('$nomEquipe qualifié pour le tour suivant !');
+
+      // Écriture du gagnant et propagation — dans _tableMatch (consolante ou arbre)
+      await _supabase.from(_tableMatch).update({'Gagnant': codeEquipe}).eq('id', widget.match['id']);
+      await _supabase.from(_tableMatch).update({equipeSuivante: nomEquipe}).eq('id', idMatchSuivant);
+      await _supabase.from(_tableMatch).update({codeEquipeSuivant: codeEquipe}).eq('id', idMatchSuivant);
+
+      if (_estConsolante) {
+        _snackSuccess('$nomEquipe qualifié pour le tour suivant (consolante) !');
+      } else {
+        _snackSuccess('$nomEquipe qualifié pour le tour suivant !');
+      }
     }
 
     await _attributionRepas('gagnant', widget.match['CodeCategorie'], widget.match['id'], equipe);
@@ -536,10 +546,6 @@ class _ArbitrageMatchPageState extends State<ArbitrageMatchPage> {
   // ATTRIBUTION DONNÉES MATCH
   // ══════════════════════════════════════════════════════════════════════════
   Future<void> _attributionDonnesMatch() async {
-    // On relit les données depuis la DB pour être sûr d'avoir les valeurs à jour.
-    // Note : on passe volontairement la vérification Gagnant == '0' car à ce stade
-    // widget.match['Gagnant'] a déjà été mis à 'Gagnant' par setState — on utilise
-    // directement les scores pour décider des points bonus.
     final match   = await _supabase.from(_tableMatch).select().eq('id', widget.match['id']).single();
     final equipe1 = await _supabase.from('Equipes').select().eq('id', widget.match['CodeEquipe1']).single();
     final equipe2 = await _supabase.from('Equipes').select().eq('id', widget.match['CodeEquipe2']).single();
@@ -555,14 +561,11 @@ class _ArbitrageMatchPageState extends State<ArbitrageMatchPage> {
     final s1    = int.parse(match['Score1'].toString());
     final s2    = int.parse(match['Score2'].toString());
 
-    // Points bonus R15M — appliqués uniquement si les scores sont différents
-    // (le cas égalité est géré dans _gagnant, pas ici)
     if (widget.match['CodeCategorie'] == 'R15M' && s1 != s2) {
       var pts1 = int.parse((await _supabase.from('Equipes').select('Points').eq('id', match['CodeEquipe1']).single())['Points'].toString());
       var pts2 = int.parse((await _supabase.from('Equipes').select('Points').eq('id', match['CodeEquipe2']).single())['Points'].toString());
-      // Bonus essai (3 essais d'écart ou plus)
       if (int.parse(match['NbEssai1'].toString()) >= int.parse(match['NbEssai2'].toString()) + 3) pts1++;
-      else if (s1 < s2 && s1 > s2 - 7) pts1++; // Bonus défaite de moins de 7 pts
+      else if (s1 < s2 && s1 > s2 - 7) pts1++;
       if (int.parse(match['NbEssai2'].toString()) >= int.parse(match['NbEssai1'].toString()) + 3) pts2++;
       else if (s2 < s1 && s2 > s1 - 7) pts2++;
       await _supabase.from('Equipes').update({'Points': pts1.toString()}).eq('id', widget.match['CodeEquipe1']);
@@ -574,53 +577,44 @@ class _ArbitrageMatchPageState extends State<ArbitrageMatchPage> {
     if (ga1 == 'NaN') ga1 = '0';
     if (ga2 == 'NaN') ga2 = '0';
 
-    // NbBleu n'existe pas dans la table Equipes — on ne l'inclut pas
     await _supabase.from('Equipes').update({
-      'GoalAverage':    ga1,
-      'NbEssai':        nbE1m,
-      'NbEssaiEncaisse': nbE1e.toString(),
-      'NbJaune':        cj1.toString(),
-      'NbRouge':        cr1.toString(),
+      'GoalAverage': ga1, 'NbEssai': nbE1m,
+      'NbEssaiEncaisse': nbE1e.toString(), 'NbJaune': cj1.toString(), 'NbRouge': cr1.toString(),
     }).eq('id', widget.match['CodeEquipe1']);
 
     await _supabase.from('Equipes').update({
-      'GoalAverage':    ga2,
-      'NbEssai':        nbE2m,
-      'NbEssaiEncaisse': nbE2e.toString(),
-      'NbJaune':        cj2.toString(),
-      'NbRouge':        cr2.toString(),
+      'GoalAverage': ga2, 'NbEssai': nbE2m,
+      'NbEssaiEncaisse': nbE2e.toString(), 'NbJaune': cj2.toString(), 'NbRouge': cr2.toString(),
     }).eq('id', widget.match['CodeEquipe2']);
   }
 
   // ══════════════════════════════════════════════════════════════════════════
-  // PASSAGE POULE → COMPÉTITION
+  // PASSAGE POULE → COMPÉTITION + CONSOLANTE
   // ══════════════════════════════════════════════════════════════════════════
   Future<void> _passagePouleACompetition(String codeEquipe, String nomEquipe) async {
     final matchsPoule = await _supabase.from(_tableMatch).select().eq('Poule', widget.match['Poule']);
     final pouleFinie  = (matchsPoule as List).every((m) => m['Gagnant'] != '0');
 
     if (pouleFinie) {
-      // Dans _passagePouleACompetition
       List equipesPoule = await _supabase.from('Equipes').select()
           .eq('Poule', widget.match['Poule'])
           .eq('Categorie', widget.match['CodeCategorie'])
           .order('Points');
       equipesPoule = _trieEquipes(equipesPoule);
-      // APRÈS
-// Matrice spécifique selon le nombre de poules de la catégorie
-      final List<List<String>> matrice;
-      if (widget.match['CodeCategorie'] == 'RF') {
-        // 4 poules A-D → adapter les IDs de matchs d'arbre RF
-        // Format : [CodeEquipeX, EquipeX, rang (0=1er, 1=2e), idMatchArbre, poule]
-        matrice = [
+
+      final cat = widget.match['CodeCategorie'];
+
+      // ── Matrice arbre principal ──────────────────────────────────────────
+      final List<List<String>> matriceArbre;
+      if (cat == 'RF') {
+        matriceArbre = [
           ['CodeEquipe1','Equipe1','0','11','A'], ['CodeEquipe2','Equipe2','0','11','C'],
           ['CodeEquipe1','Equipe1','1','12','B'], ['CodeEquipe2','Equipe2','1','12','D'],
           ['CodeEquipe1','Equipe1','0','13','B'], ['CodeEquipe2','Equipe2','0','13','D'],
           ['CodeEquipe1','Equipe1','1','14','A'], ['CodeEquipe2','Equipe2','1','14','C'],
         ];
       } else {
-        // Catégories à 6 poules : R15M, R7M, R7F
-        matrice = [
+        matriceArbre = [
           ['CodeEquipe1','Equipe1','1','11','A'], ['CodeEquipe2','Equipe2','1','11','C'],
           ['CodeEquipe1','Equipe1','0','12','D'], ['CodeEquipe1','Equipe1','0','13','B'],
           ['CodeEquipe1','Equipe1','0','14','F'], ['CodeEquipe2','Equipe2','1','14','E'],
@@ -629,274 +623,323 @@ class _ArbitrageMatchPageState extends State<ArbitrageMatchPage> {
           ['CodeEquipe1','Equipe1','1','18','B'], ['CodeEquipe2','Equipe2','1','18','F'],
         ];
       }
-      for (final ligne in matrice) {
+      for (final ligne in matriceArbre) {
         if (widget.match['Poule'] == ligne[4]) {
-          await _supabase.from(widget.match['CodeCategorie']).update({ligne[0]: equipesPoule[int.parse(ligne[2])]['id']}).eq('id', ligne[3]);
-          await _supabase.from(widget.match['CodeCategorie']).update({ligne[1]: equipesPoule[int.parse(ligne[2])]['Name']}).eq('id', ligne[3]);
+          await _supabase.from(cat).update({ligne[0]: equipesPoule[int.parse(ligne[2])]['id']}).eq('id', ligne[3]);
+          await _supabase.from(cat).update({ligne[1]: equipesPoule[int.parse(ligne[2])]['Name']}).eq('id', ligne[3]);
         }
       }
-      await _alert('Poule terminée', 'Les deux meilleurs ont été attribués dans la compétition.', couleur: const Color(0xFF2D9148));
+
+      // ── Matrice consolante (4ᵉ de chaque poule → quarts consolante) ─────
+      // Les consolantes ne concernent pas RF (pas de table ConsolanteRF).
+      if (cat != 'RF') {
+        // Format : [CodeEquipeX, EquipeX, rang (3=4ème), idMatchConsolante, poule]
+        // 6 poules (A-F), 4 quarts de finale consolante (IDs 11–14 niveau 1)
+        // Appariements : A4 vs D4, B4 vs E4, C4 vs F4
+        // + les 2 pires troisièmes se joueront après calcul global (voir _piresTroisiemesConsolante)
+        final List<List<String>> matriceConsolante = [
+          ['CodeEquipe1','Equipe1','3','11','A'], // 4ème poule A → match consolante 11
+          ['CodeEquipe2','Equipe2','3','11','D'], // 4ème poule D → match consolante 11
+          ['CodeEquipe1','Equipe1','3','12','B'], // 4ème poule B → match consolante 12
+          ['CodeEquipe2','Equipe2','3','12','E'], // 4ème poule E → match consolante 12
+          ['CodeEquipe1','Equipe1','3','13','C'], // 4ème poule C → match consolante 13
+          ['CodeEquipe2','Equipe2','3','13','F'], // 4ème poule F → match consolante 13
+        ];
+        final tableConsolante = 'Consolante$cat';
+        for (final ligne in matriceConsolante) {
+          if (widget.match['Poule'] == ligne[4]) {
+            await _supabase.from(tableConsolante).update({ligne[0]: equipesPoule[int.parse(ligne[2])]['id']}).eq('id', ligne[3]);
+            await _supabase.from(tableConsolante).update({ligne[1]: equipesPoule[int.parse(ligne[2])]['Name']}).eq('id', ligne[3]);
+          }
+        }
+      }
+
+      await _alert('Poule terminée', 'Les deux premiers et le quatrième ont été attribués dans leurs compétitions respectives.', couleur: const Color(0xFF2D9148));
     }
 
+    // ── Vérification fin de toutes les poules ───────────────────────────────
     final matchsCat = await _supabase.from(_tableMatch).select();
-    // APRÈS — RF a 4 poules, pas de règle "meilleurs troisièmes" à 6 poules
-    final catFinie = (matchsCat as List).every((m) => m['Gagnant'] != '0');
-    if (catFinie && widget.match['CodeCategorie'] != 'RF') {
+    final catFinie  = (matchsCat as List).every((m) => m['Gagnant'] != '0');
+    final cat       = widget.match['CodeCategorie'];
+
+    if (catFinie && cat != 'RF') {
+      // Meilleurs troisièmes → arbre principal (logique existante)
       final et = <dynamic>[];
       for (final p in ['A','B','C','D','E','F']) {
         List eq = await _supabase.from('Equipes').select()
-            .eq('Poule', p).eq('Categorie', widget.match['CodeCategorie']).order('Points');
+            .eq('Poule', p).eq('Categorie', cat).order('Points');
         eq = _trieEquipes(eq);
-        et.add(eq[2]);
+        et.add(eq[2]); // 3ème de chaque poule
       }
       await _mt(et);
+
+      // Pires troisièmes → consolante (4ᵉ match consolante ID 14)
+      await _piresTroisiemesConsolante(et, cat);
     }
+  }
+
+  // ══════════════════════════════════════════════════════════════════════════
+  // PIRES TROISIÈMES → CONSOLANTE
+  // ══════════════════════════════════════════════════════════════════════════
+  /// Parmi les 6 troisièmes, sélectionne les 2 pires (index 4 et 5 après tri
+  /// descendant) et les place dans le match consolante ID 14 (niveau 1).
+  Future<void> _piresTroisiemesConsolante(List troisiemes, String cat) async {
+    // _trieEquipes trie du meilleur au moins bon -> index 4 et 5 = 2 pires
+    final trie = _trieEquipes(List.from(troisiemes));
+    final pire1 = trie[4];
+    final pire2 = trie[5];
+
+  final tableConsolante = 'Consolante$cat';
+  await _supabase.from(tableConsolante).update({
+  'CodeEquipe1': pire1['id'], 'Equipe1': pire1['Name'],
+  }).eq('id', '14');
+  await _supabase.from(tableConsolante).update({
+  'CodeEquipe2': pire2['id'], 'Equipe2': pire2['Name'],
+  }).eq('id', '14');
+
+  await _alert(
+  'Consolante — 4ᵉ match',
+  'Les 2 pires troisièmes (${pire1["Name"]} et ${pire2["Name"]}) '
+  'ont été placés dans le dernier quart de finale de consolante.',
+  couleur: const Color(0xFFD47A1A),
+  );
   }
 
   // ══════════════════════════════════════════════════════════════════════════
   // TRI ÉQUIPES
   // ══════════════════════════════════════════════════════════════════════════
   List _trieEquipes(List equipesPoule) {
-    for (int i = 0; i < equipesPoule.length - 1; i++) {
-      for (int j = 0; j < equipesPoule.length - 1 - i; j++) {
-        final e1 = equipesPoule[j]; final e2 = equipesPoule[j + 1];
-        bool swap = false;
-        if (int.parse(e1['Points'].toString()) < int.parse(e2['Points'].toString())) {
-          swap = true;
-        } else if (int.parse(e1['Points'].toString()) == int.parse(e2['Points'].toString())) {
-          if (double.parse(e1['GoalAverage'].toString()) < double.parse(e2['GoalAverage'].toString())) {
-            swap = true;
-          } else if (double.parse(e1['GoalAverage'].toString()) == double.parse(e2['GoalAverage'].toString())) {
-            if (e1['NbEssai'] < e2['NbEssai']) swap = true;
-            else if (e1['NbEssai'] == e2['NbEssai']) {
-              if (int.parse(e1['NbRouge'].toString()) > int.parse(e2['NbRouge'].toString())) swap = true;
-              else if (int.parse(e1['NbRouge'].toString()) == int.parse(e2['NbRouge'].toString())) {
-                if (int.parse(e1['NbJaune'].toString()) > int.parse(e2['NbJaune'].toString())) swap = true;
-                else if (int.parse(e1['NbJaune'].toString()) == int.parse(e2['NbJaune'].toString())) {
-                  if (int.parse(e1['MatchsGagne'].toString()) < int.parse(e2['MatchsGagne'].toString())) swap = true;
-                }
-              }
-            }
-          }
-        }
-        if (swap) { final tmp = equipesPoule[j]; equipesPoule[j] = equipesPoule[j + 1]; equipesPoule[j + 1] = tmp; }
-      }
-    }
-    return equipesPoule;
+  for (int i = 0; i < equipesPoule.length - 1; i++) {
+  for (int j = 0; j < equipesPoule.length - 1 - i; j++) {
+  final e1 = equipesPoule[j]; final e2 = equipesPoule[j + 1];
+  bool swap = false;
+  if (int.parse(e1['Points'].toString()) < int.parse(e2['Points'].toString())) {
+  swap = true;
+  } else if (int.parse(e1['Points'].toString()) == int.parse(e2['Points'].toString())) {
+  if (double.parse(e1['GoalAverage'].toString()) < double.parse(e2['GoalAverage'].toString())) {
+  swap = true;
+  } else if (double.parse(e1['GoalAverage'].toString()) == double.parse(e2['GoalAverage'].toString())) {
+  if (e1['NbEssai'] < e2['NbEssai']) swap = true;
+  else if (e1['NbEssai'] == e2['NbEssai']) {
+  if (int.parse(e1['NbRouge'].toString()) > int.parse(e2['NbRouge'].toString())) swap = true;
+  else if (int.parse(e1['NbRouge'].toString()) == int.parse(e2['NbRouge'].toString())) {
+  if (int.parse(e1['NbJaune'].toString()) > int.parse(e2['NbJaune'].toString())) swap = true;
+  else if (int.parse(e1['NbJaune'].toString()) == int.parse(e2['NbJaune'].toString())) {
+  if (int.parse(e1['MatchsGagne'].toString()) < int.parse(e2['MatchsGagne'].toString())) swap = true;
+  }
+  }
+  }
+  }
+  }
+  if (swap) { final tmp = equipesPoule[j]; equipesPoule[j] = equipesPoule[j + 1]; equipesPoule[j + 1] = tmp; }
+  }
+  }
+  return equipesPoule;
   }
 
   // ══════════════════════════════════════════════════════════════════════════
-  // MATRICE TROISIÈMES
+  // MATRICE MEILLEURS TROISIÈMES (arbre principal — inchangé)
   // ══════════════════════════════════════════════════════════════════════════
   Future<void> _mt(List equipesTroisieme) async {
-    const header = ['17', '13', '15', '12'];
-    const matriceTroisieme = [
-      [['A','B','C','D'], 'C', 'D', 'A','B'], [['A','B','C','E'], 'C', 'A', 'B','E'],
-      [['A','B','C','F'], 'C', 'A', 'B','F'], [['A','B','D','E'], 'D', 'A', 'B','E'],
-      [['A','B','D','F'], 'D', 'A', 'B','F'], [['A','B','E','F'], 'E', 'A', 'B','F'],
-      [['A','C','D','E'], 'C', 'D', 'A','E'], [['A','C','D','F'], 'C', 'D', 'A','F'],
-      [['A','C','E','F'], 'C', 'A', 'F','E'], [['A','D','E','F'], 'D', 'A', 'F','E'],
-      [['B','C','D','E'], 'C', 'D', 'B','E'], [['B','C','D','F'], 'C', 'D', 'B','F'],
-      [['B','C','E','F'], 'E', 'C', 'B','F'], [['B','D','E','F'], 'E', 'D', 'B','F'],
-      [['C','D','E','F'], 'C', 'D', 'F','E'],
-    ];
+  const header = ['17', '13', '15', '12'];
+  const matriceTroisieme = [
+  [['A','B','C','D'], 'C', 'D', 'A','B'], [['A','B','C','E'], 'C', 'A', 'B','E'],
+  [['A','B','C','F'], 'C', 'A', 'B','F'], [['A','B','D','E'], 'D', 'A', 'B','E'],
+  [['A','B','D','F'], 'D', 'A', 'B','F'], [['A','B','E','F'], 'E', 'A', 'B','F'],
+  [['A','C','D','E'], 'C', 'D', 'A','E'], [['A','C','D','F'], 'C', 'D', 'A','F'],
+  [['A','C','E','F'], 'C', 'A', 'F','E'], [['A','D','E','F'], 'D', 'A', 'F','E'],
+  [['B','C','D','E'], 'C', 'D', 'B','E'], [['B','C','D','F'], 'C', 'D', 'B','F'],
+  [['B','C','E','F'], 'E', 'C', 'B','F'], [['B','D','E','F'], 'E', 'D', 'B','F'],
+  [['C','D','E','F'], 'C', 'D', 'F','E'],
+  ];
 
-    equipesTroisieme = _trieEquipes(equipesTroisieme);
-    final e1 = equipesTroisieme[0]['Poule']; final e2 = equipesTroisieme[1]['Poule'];
-    final e3 = equipesTroisieme[2]['Poule']; final e4 = equipesTroisieme[3]['Poule'];
-    final codeEquipes = [equipesTroisieme[0]['id'], equipesTroisieme[1]['id'], equipesTroisieme[2]['id'], equipesTroisieme[3]['id']];
-    final nomEquipes  = [equipesTroisieme[0]['Name'], equipesTroisieme[1]['Name'], equipesTroisieme[2]['Name'], equipesTroisieme[3]['Name']];
+  equipesTroisieme = _trieEquipes(equipesTroisieme);
+  final e1 = equipesTroisieme[0]['Poule']; final e2 = equipesTroisieme[1]['Poule'];
+  final e3 = equipesTroisieme[2]['Poule']; final e4 = equipesTroisieme[3]['Poule'];
+  final codeEquipes = [equipesTroisieme[0]['id'], equipesTroisieme[1]['id'], equipesTroisieme[2]['id'], equipesTroisieme[3]['id']];
+  final nomEquipes  = [equipesTroisieme[0]['Name'], equipesTroisieme[1]['Name'], equipesTroisieme[2]['Name'], equipesTroisieme[3]['Name']];
 
-    await _alert('Attribution des meilleurs troisièmes',
-        'Les 4 meilleurs troisièmes sont issus des poules : $e1, $e2, $e3, $e4',
-        couleur: const Color(0xFF5B8FCC));
+  await _alert('Attribution des meilleurs troisièmes',
+  'Les 4 meilleurs troisièmes sont issus des poules : $e1, $e2, $e3, $e4',
+  couleur: const Color(0xFF5B8FCC));
 
-    var correspondance = 0; var lignes;
-    for (lignes in matriceTroisieme) {
-      correspondance = 0;
-      for (final e in [e1, e2, e3, e4]) {
-        if ((lignes[0] as List).contains(e)) correspondance++;
-        if (correspondance == 4) break;
-      }
-      if (correspondance == 4) break;
-    }
+  var correspondance = 0; var lignes;
+  for (lignes in matriceTroisieme) {
+  correspondance = 0;
+  for (final e in [e1, e2, e3, e4]) {
+  if ((lignes[0] as List).contains(e)) correspondance++;
+  if (correspondance == 4) break;
+  }
+  if (correspondance == 4) break;
+  }
 
-    if (correspondance == 4) {
-      for (int index = 0; index < 4; index++) {
-        var colonne = 0;
-        final ce = codeEquipes[index];
-        final pe = equipesTroisieme[index]['Poule'];
-        final ne = nomEquipes[index];
-        for (final value in (lignes as List)) {
-          if (value == pe) {
-            await _supabase.from(widget.match['CodeCategorie']).update({'CodeEquipe2': ce}).eq('id', header[colonne - 1]);
-            await _supabase.from(widget.match['CodeCategorie']).update({'Equipe2': ne}).eq('id', header[colonne - 1]);
-            break;
-          }
-          colonne++;
-        }
-      }
-    }
+  if (correspondance == 4) {
+  for (int index = 0; index < 4; index++) {
+  var colonne = 0;
+  final ce = codeEquipes[index];
+  final pe = equipesTroisieme[index]['Poule'];
+  final ne = nomEquipes[index];
+  for (final value in (lignes as List)) {
+  if (value == pe) {
+  await _supabase.from(widget.match['CodeCategorie']).update({'CodeEquipe2': ce}).eq('id', header[colonne - 1]);
+  await _supabase.from(widget.match['CodeCategorie']).update({'Equipe2': ne}).eq('id', header[colonne - 1]);
+  break;
+  }
+  colonne++;
+  }
+  }
+  }
   }
 
   // ══════════════════════════════════════════════════════════════════════════
   // LEVER SUSPENSIONS
   // ══════════════════════════════════════════════════════════════════════════
   Future<void> _leverSuspensionsCartonRouge() async {
-    final j1 = await _supabase.from('Comptes').select().eq('type', 'joueur').eq('equipe', widget.match['CodeEquipe1']).eq('Suspendu1match', true);
-    final j2 = await _supabase.from('Comptes').select().eq('type', 'joueur').eq('equipe', widget.match['CodeEquipe2']).eq('Suspendu1match', true);
-    for (final j in [...(j1 as List), ...(j2 as List)]) {
-      await _supabase.from('Comptes').update({'Suspendu1match': false}).eq('id', j['id']);
-    }
-    for (final j in [..._joueursEquipe1, ..._joueursEquipe2]) {
-      if (j['suspendu_un_match'] == true) {
-        await _supabase.from('joueur').update({'suspendu_un_match': false}).eq('id', j['id']);
-      }
-    }
+  final j1 = await _supabase.from('Comptes').select().eq('type', 'joueur').eq('equipe', widget.match['CodeEquipe1']).eq('Suspendu1match', true);
+  final j2 = await _supabase.from('Comptes').select().eq('type', 'joueur').eq('equipe', widget.match['CodeEquipe2']).eq('Suspendu1match', true);
+  for (final j in [...(j1 as List), ...(j2 as List)]) {
+  await _supabase.from('Comptes').update({'Suspendu1match': false}).eq('id', j['id']);
+  }
+  for (final j in [..._joueursEquipe1, ..._joueursEquipe2]) {
+  if (j['suspendu_un_match'] == true) {
+  await _supabase.from('joueur').update({'suspendu_un_match': false}).eq('id', j['id']);
+  }
+  }
   }
 
   // ══════════════════════════════════════════════════════════════════════════
   // ATTRIBUTION REPAS
   // ══════════════════════════════════════════════════════════════════════════
   Future<void> _attributionRepas(String etat, String categorie, dynamic id, String idEquipe) async {
-    if (!['R15M','R7M','R7F'].contains(categorie)) return;
-    final idStr = id.toString();
-    try {
-      if (etat == 'perdant' && idStr.isNotEmpty && idStr[0] == '2') {
-        final repas = await _supabase.from('Equipes').select('Repas').eq('id', idEquipe).single();
-        repas['Repas']['Repas'].add('2025-05-10 11:15:00');
-        await _supabase.from('Equipes').update({'Repas': repas['Repas']}).eq('id', idEquipe);
-      }
-      if ((categorie == 'R15M' && idStr == '31') ||
-          (etat == 'perdant' && categorie == 'R15M' && idStr == '23') ||
-          (etat == 'perdant' && categorie == 'R15M' && idStr == '24') ||
-          (etat == 'perdant' && categorie == 'R7M'  && idStr.isNotEmpty && idStr[0] == '2') ||
-          (etat == 'perdant' && categorie == 'R7F'  && idStr.isNotEmpty && idStr[0] == '2')) {
-        final repas = await _supabase.from('Equipes').select('Repas').eq('id', idEquipe).single();
-        repas['Repas']['Repas'].add('2025-05-10 12:30:00');
-        await _supabase.from('Equipes').update({'Repas': repas['Repas']}).eq('id', idEquipe);
-      }
-      if ((categorie == 'R15M' && idStr.isNotEmpty && idStr[0] == '3') ||
-          (categorie == 'R7M'  && idStr.isNotEmpty && idStr[0] == '3') ||
-          (categorie == 'R7F'  && idStr.isNotEmpty && idStr[0] == '3')) {
-        final repas = await _supabase.from('Equipes').select('Repas').eq('id', idEquipe).single();
-        repas['Repas']['Repas'].add('2025-05-10 13:30:00');
-        await _supabase.from('Equipes').update({'Repas': repas['Repas']}).eq('id', idEquipe);
-      }
-    } catch (_) {}
+  if (!['R15M','R7M','R7F'].contains(categorie)) return;
+  final idStr = id.toString();
+  try {
+  if (etat == 'perdant' && idStr.isNotEmpty && idStr[0] == '2') {
+  final repas = await _supabase.from('Equipes').select('Repas').eq('id', idEquipe).single();
+  repas['Repas']['Repas'].add('2025-05-10 11:15:00');
+  await _supabase.from('Equipes').update({'Repas': repas['Repas']}).eq('id', idEquipe);
+  }
+  if ((categorie == 'R15M' && idStr == '31') ||
+  (etat == 'perdant' && categorie == 'R15M' && idStr == '23') ||
+  (etat == 'perdant' && categorie == 'R15M' && idStr == '24') ||
+  (etat == 'perdant' && categorie == 'R7M'  && idStr.isNotEmpty && idStr[0] == '2') ||
+  (etat == 'perdant' && categorie == 'R7F'  && idStr.isNotEmpty && idStr[0] == '2')) {
+  final repas = await _supabase.from('Equipes').select('Repas').eq('id', idEquipe).single();
+  repas['Repas']['Repas'].add('2025-05-10 12:30:00');
+  await _supabase.from('Equipes').update({'Repas': repas['Repas']}).eq('id', idEquipe);
+  }
+  if ((categorie == 'R15M' && idStr.isNotEmpty && idStr[0] == '3') ||
+  (categorie == 'R7M'  && idStr.isNotEmpty && idStr[0] == '3') ||
+  (categorie == 'R7F'  && idStr.isNotEmpty && idStr[0] == '3')) {
+  final repas = await _supabase.from('Equipes').select('Repas').eq('id', idEquipe).single();
+  repas['Repas']['Repas'].add('2025-05-10 13:30:00');
+  await _supabase.from('Equipes').update({'Repas': repas['Repas']}).eq('id', idEquipe);
+  }
+  } catch (_) {}
   }
 
   // ══════════════════════════════════════════════════════════════════════════
-  // GÉNÉRATION PDF + UPLOAD SUPABASE
+  // GÉNÉRATION PDF
   // ══════════════════════════════════════════════════════════════════════════
-
-  // Reconstruit les listes nominatives de cartons depuis la table joueur.
-  // On filtre par team_code et on ne retient que les joueurs ayant au moins
-  // 1 carton du type demandé. Cela fonctionne même si la page a été rechargée.
-  Future<List<Map<String, String>>> _joueursAvecCarton(
-      String teamCode, String champ) async {
-    if (teamCode.isEmpty) return [];
-    final rows = await _supabase
-        .from('joueur')
-        .select('nom, prenom, $champ')
-        .eq('team_code', teamCode)
-        .gt(champ, 0)
-        .order('nom', ascending: true);
-    return (rows as List).map((r) {
-      final nom    = '${r["prenom"] ?? ""} ${r["nom"] ?? ""}'.trim();
-      final count  = r[champ]?.toString() ?? '1';
-      return {'nom': '$nom ($count)', 'motif': ''};
-    }).toList();
+  Future<List<Map<String, String>>> _joueursAvecCarton(String teamCode, String champ) async {
+  if (teamCode.isEmpty) return [];
+  final rows = await _supabase
+      .from('joueur')
+      .select('nom, prenom, $champ')
+      .eq('team_code', teamCode)
+      .gt(champ, 0)
+      .order('nom', ascending: true);
+  return (rows as List).map((r) {
+  final nom   = '${r["prenom"] ?? ""} ${r["nom"] ?? ""}'.trim();
+  final count = r[champ]?.toString() ?? '1';
+  return {'nom': '$nom ($count)', 'motif': ''};
+  }).toList();
   }
 
   Future<void> _genererFeuilleDeMatch() async {
-    if (_signatureArbitre.isEmpty || _signatureCapitaine1.isEmpty || _signatureCapitaine2.isEmpty) {
-      await _alert('Signatures manquantes',
-          'Veuillez compléter toutes les signatures avant de générer la feuille de match.',
-          couleur: const Color(0xFFD47A1A));
-      return;
-    }
-    setState(() => _generationEnCours = true);
-    try {
-      final safeDataMatch = <String, String>{
-        'Score1':       _dataMatch['Score1']       ?? widget.match['Score1']?.toString()       ?? '0',
-        'Score2':       _dataMatch['Score2']       ?? widget.match['Score2']?.toString()       ?? '0',
-        'NbEssai1':     _dataMatch['NbEssai1']     ?? widget.match['NbEssai1']?.toString()     ?? '0',
-        'NbEssai2':     _dataMatch['NbEssai2']     ?? widget.match['NbEssai2']?.toString()     ?? '0',
-        'CartonJaune1': _dataMatch['CartonJaune1'] ?? widget.match['CartonJaune1']?.toString() ?? '0',
-        'CartonJaune2': _dataMatch['CartonJaune2'] ?? widget.match['CartonJaune2']?.toString() ?? '0',
-        'CartonRouge1': _dataMatch['CartonRouge1'] ?? widget.match['CartonRouge1']?.toString() ?? '0',
-        'CartonRouge2': _dataMatch['CartonRouge2'] ?? widget.match['CartonRouge2']?.toString() ?? '0',
-        'CartonBleu1':  _dataMatch['CartonBleu1']  ?? widget.match['CartonBleu1']?.toString()  ?? '0',
-        'CartonBleu2':  _dataMatch['CartonBleu2']  ?? widget.match['CartonBleu2']?.toString()  ?? '0',
-      };
+  if (_signatureArbitre.isEmpty || _signatureCapitaine1.isEmpty || _signatureCapitaine2.isEmpty) {
+  await _alert('Signatures manquantes',
+  'Veuillez compléter toutes les signatures avant de générer la feuille de match.',
+  couleur: const Color(0xFFD47A1A));
+  return;
+  }
+  setState(() => _generationEnCours = true);
+  try {
+  final safeDataMatch = <String, String>{
+  'Score1':       _dataMatch['Score1']       ?? widget.match['Score1']?.toString()       ?? '0',
+  'Score2':       _dataMatch['Score2']       ?? widget.match['Score2']?.toString()       ?? '0',
+  'NbEssai1':     _dataMatch['NbEssai1']     ?? widget.match['NbEssai1']?.toString()     ?? '0',
+  'NbEssai2':     _dataMatch['NbEssai2']     ?? widget.match['NbEssai2']?.toString()     ?? '0',
+  'CartonJaune1': _dataMatch['CartonJaune1'] ?? widget.match['CartonJaune1']?.toString() ?? '0',
+  'CartonJaune2': _dataMatch['CartonJaune2'] ?? widget.match['CartonJaune2']?.toString() ?? '0',
+  'CartonRouge1': _dataMatch['CartonRouge1'] ?? widget.match['CartonRouge1']?.toString() ?? '0',
+  'CartonRouge2': _dataMatch['CartonRouge2'] ?? widget.match['CartonRouge2']?.toString() ?? '0',
+  'CartonBleu1':  _dataMatch['CartonBleu1']  ?? widget.match['CartonBleu1']?.toString()  ?? '0',
+  'CartonBleu2':  _dataMatch['CartonBleu2']  ?? widget.match['CartonBleu2']?.toString()  ?? '0',
+  };
 
-      // ── Reconstruction des listes nominatives depuis joueur ───────────────
-      // On interroge directement la table joueur par team_code pour avoir
-      // les noms réels, même si la page a été rechargée entre les cartons
-      // et la génération de la feuille.
-      final code1 = widget.match['CodeEquipe1']?.toString() ?? '';
-      final code2 = widget.match['CodeEquipe2']?.toString() ?? '';
+  final code1 = widget.match['CodeEquipe1']?.toString() ?? '';
+  final code2 = widget.match['CodeEquipe2']?.toString() ?? '';
 
-      final joueursJaune1 = await _joueursAvecCarton(code1, 'carton_jaune');
-      final joueursJaune2 = await _joueursAvecCarton(code2, 'carton_jaune');
-      final joueursRouge1 = await _joueursAvecCarton(code1, 'carton_rouge');
-      final joueursRouge2 = await _joueursAvecCarton(code2, 'carton_rouge');
-      final joueursBleu1  = await _joueursAvecCarton(code1, 'carton_bleu');
-      final joueursBleu2  = await _joueursAvecCarton(code2, 'carton_bleu');
+  final joueursJaune1 = await _joueursAvecCarton(code1, 'carton_jaune');
+  final joueursJaune2 = await _joueursAvecCarton(code2, 'carton_jaune');
+  final joueursRouge1 = await _joueursAvecCarton(code1, 'carton_rouge');
+  final joueursRouge2 = await _joueursAvecCarton(code2, 'carton_rouge');
+  final joueursBleu1  = await _joueursAvecCarton(code1, 'carton_bleu');
+  final joueursBleu2  = await _joueursAvecCarton(code2, 'carton_bleu');
 
-      // Ajouter le motif pour les cartons bleus
-      for (final j in joueursBleu1) j['motif'] = 'Suspicion commotion / exclusion définitive';
-      for (final j in joueursBleu2) j['motif'] = 'Suspicion commotion / exclusion définitive';
+  for (final j in joueursBleu1) j['motif'] = 'Suspicion commotion / exclusion définitive';
+  for (final j in joueursBleu2) j['motif'] = 'Suspicion commotion / exclusion définitive';
 
-      final sig1 = await _signatureArbitre.toPngBytes();
-      final sig2 = await _signatureCapitaine1.toPngBytes();
-      final sig3 = await _signatureCapitaine2.toPngBytes();
+  final sig1 = await _signatureArbitre.toPngBytes();
+  final sig2 = await _signatureCapitaine1.toPngBytes();
+  final sig3 = await _signatureCapitaine2.toPngBytes();
 
-      final data = MatchSheetData.fromMatch(
-        match:     widget.match,
-        dataMatch: safeDataMatch,
-        joueursCartonJaune1: joueursJaune1,
-        joueursCartonJaune2: joueursJaune2,
-        joueursCartonRouge1: joueursRouge1,
-        joueursCartonRouge2: joueursRouge2,
-        joueursCartonBleu1:  joueursBleu1,
-        joueursCartonBleu2:  joueursBleu2,
-        commentaireExclusions:   _ctrlExclusions.text.trim(),
-        commentaireBlessures:    _ctrlBlessures.text.trim(),
-        observationRespoTerrain: _ctrlObservationRespo.text.trim(),
-        nomArbitre:              _ctrlNomArbitre.text.trim(),
-        reclamationEquipe1:      _ctrlReclamation1.text.trim(),
-        reclamationEquipe2:      _ctrlReclamation2.text.trim(),
-        joueursEquipe1: _joueursEquipe1.map((j) => '${j["prenom"] ?? ""} ${j["nom"] ?? ""}'.trim()).toList(),
-        joueursEquipe2: _joueursEquipe2.map((j) => '${j["prenom"] ?? ""} ${j["nom"] ?? ""}'.trim()).toList(),
-        signatureArbitre:    sig1 != null ? base64Encode(sig1) : null,
-        signatureCapitaine1: sig2 != null ? base64Encode(sig2) : null,
-        signatureCapitaine2: sig3 != null ? base64Encode(sig3) : null,
-      );
+  final data = MatchSheetData.fromMatch(
+  match:     widget.match,
+  dataMatch: safeDataMatch,
+  joueursCartonJaune1: joueursJaune1,
+  joueursCartonJaune2: joueursJaune2,
+  joueursCartonRouge1: joueursRouge1,
+  joueursCartonRouge2: joueursRouge2,
+  joueursCartonBleu1:  joueursBleu1,
+  joueursCartonBleu2:  joueursBleu2,
+  commentaireExclusions:   _ctrlExclusions.text.trim(),
+  commentaireBlessures:    _ctrlBlessures.text.trim(),
+  observationRespoTerrain: _ctrlObservationRespo.text.trim(),
+  nomArbitre:              _ctrlNomArbitre.text.trim(),
+  reclamationEquipe1:      _ctrlReclamation1.text.trim(),
+  reclamationEquipe2:      _ctrlReclamation2.text.trim(),
+  joueursEquipe1: _joueursEquipe1.map((j) => '${j["prenom"] ?? ""} ${j["nom"] ?? ""}'.trim()).toList(),
+  joueursEquipe2: _joueursEquipe2.map((j) => '${j["prenom"] ?? ""} ${j["nom"] ?? ""}'.trim()).toList(),
+  signatureArbitre:    sig1 != null ? base64Encode(sig1) : null,
+  signatureCapitaine1: sig2 != null ? base64Encode(sig2) : null,
+  signatureCapitaine2: sig3 != null ? base64Encode(sig3) : null,
+  );
 
-      final Uint8List pdfBytes = await MatchSheetGenerator(data).generate();
+  final Uint8List pdfBytes = await MatchSheetGenerator(data).generate();
 
-      final now        = DateTime.now();
-      final timestamp  = '${now.year}${now.month.toString().padLeft(2,'0')}${now.day.toString().padLeft(2,'0')}'
-          '-${now.hour.toString().padLeft(2,'0')}${now.minute.toString().padLeft(2,'0')}';
-      final codeEq1    = widget.match['CodeEquipe1']?.toString()  ?? 'EQ1';
-      final codeEq2    = widget.match['CodeEquipe2']?.toString()  ?? 'EQ2';
-      final cat        = widget.match['CodeCategorie']?.toString() ?? 'CAT';
-      final matchId    = widget.match['id']?.toString()           ?? '0';
-      final nomFichier = '${cat}_${codeEq1}_vs_${codeEq2}_${matchId}_$timestamp.pdf';
+  final now       = DateTime.now();
+  final timestamp = '${now.year}${now.month.toString().padLeft(2,'0')}${now.day.toString().padLeft(2,'0')}'
+  '-${now.hour.toString().padLeft(2,'0')}${now.minute.toString().padLeft(2,'0')}';
+  final codeEq1   = widget.match['CodeEquipe1']?.toString()  ?? 'EQ1';
+  final codeEq2   = widget.match['CodeEquipe2']?.toString()  ?? 'EQ2';
+  final cat       = widget.match['CodeCategorie']?.toString() ?? 'CAT';
+  final matchId   = widget.match['id']?.toString()           ?? '0';
+  final prefix    = _estConsolante ? 'CONSOLANTE_' : '';
+  final nomFichier = '${prefix}${cat}_${codeEq1}_vs_${codeEq2}_${matchId}_$timestamp.pdf';
 
-      await _supabase.storage.from('feuille de match').uploadBinary(
-        nomFichier, pdfBytes,
-        fileOptions: const FileOptions(contentType: 'application/pdf', upsert: true),
-      );
+  await _supabase.storage.from('feuille de match').uploadBinary(
+  nomFichier, pdfBytes,
+  fileOptions: const FileOptions(contentType: 'application/pdf', upsert: true),
+  );
 
-      await _alert('Feuille générée', 'PDF sauvegardé avec succès !\n$nomFichier', couleur: const Color(0xFF2D9148));
-    } catch (e) {
-      await _alert('Erreur', 'Une erreur est survenue :\n$e', couleur: const Color(0xFFE53E3E));
-    } finally {
-      setState(() => _generationEnCours = false);
-    }
+  await _alert('Feuille générée', 'PDF sauvegardé avec succès !\n$nomFichier', couleur: const Color(0xFF2D9148));
+  } catch (e) {
+  await _alert('Erreur', 'Une erreur est survenue :\n$e', couleur: const Color(0xFFE53E3E));
+  } finally {
+  setState(() => _generationEnCours = false);
+  }
   }
 
   // ══════════════════════════════════════════════════════════════════════════
@@ -904,414 +947,420 @@ class _ArbitrageMatchPageState extends State<ArbitrageMatchPage> {
   // ══════════════════════════════════════════════════════════════════════════
   @override
   Widget build(BuildContext context) {
-    _initDataMatch();
-    final matchTermine = widget.match['Gagnant'] != null && widget.match['Gagnant'] != '0';
-    final eq1 = widget.match['Equipe1']?.toString() ?? '?';
-    final eq2 = widget.match['Equipe2']?.toString() ?? '?';
-    final cat = widget.match['CodeCategorie']?.toString() ?? '';
+  _initDataMatch();
+  final matchTermine = widget.match['Gagnant'] != null && widget.match['Gagnant'] != '0';
+  final eq1 = widget.match['Equipe1']?.toString() ?? '?';
+  final eq2 = widget.match['Equipe2']?.toString() ?? '?';
+  final cat = widget.match['CodeCategorie']?.toString() ?? '';
 
-    String dateLabel = '';
-    try {
-      final dt = DateTime.parse(widget.match['Start'].toString());
-      const jours = ['Lundi','Mardi','Mercredi','Jeudi','Vendredi','Samedi','Dimanche'];
-      final hh = dt.hour.toString().padLeft(2,'0');
-      final mn = dt.minute.toString().padLeft(2,'0');
-      dateLabel = '${jours[dt.weekday-1]} ${dt.day}/${dt.month} · ${hh}h$mn';
-    } catch (_) {}
+  String dateLabel = '';
+  try {
+  final dt = DateTime.parse(widget.match['Start'].toString());
+  const jours = ['Lundi','Mardi','Mercredi','Jeudi','Vendredi','Samedi','Dimanche'];
+  final hh = dt.hour.toString().padLeft(2,'0');
+  final mn = dt.minute.toString().padLeft(2,'0');
+  dateLabel = '${jours[dt.weekday-1]} ${dt.day}/${dt.month} · ${hh}h$mn';
+  } catch (_) {}
 
-    return Scaffold(
-      backgroundColor: const Color(0xFFF5F5F0),
-      appBar: AppBar(
-        backgroundColor: _catColor, foregroundColor: Colors.white, elevation: 0,
-        leading: IconButton(icon: const Icon(Icons.arrow_back), onPressed: () => Navigator.pop(context)),
-        title: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
-          Text('$eq1  vs  $eq2',
-              style: const TextStyle(fontSize: 15, fontWeight: FontWeight.w800, color: Colors.white)),
-          Text('$cat · ${matchTermine ? "Terminé" : "En cours"} · $dateLabel',
-              style: const TextStyle(fontSize: 11, color: Colors.white70)),
-        ]),
-      ),
-      body: !_joueursCharges
-          ? const Center(child: CircularProgressIndicator())
-          : SingleChildScrollView(
-        padding: const EdgeInsets.fromLTRB(24, 20, 24, 40),
-        child: Column(crossAxisAlignment: CrossAxisAlignment.stretch, children: [
-          _bandeauSuspendus(),
-          const SizedBox(height: 16),
-          _sectionScore(),
-          const SizedBox(height: 20),
-          if (!matchTermine) ...[
-            _sectionFinDeMatch(),
-            const SizedBox(height: 20),
-            _sectionActions(),
-            const SizedBox(height: 20),
-            _sectionModifDirecte(),
-            const SizedBox(height: 20),
-          ],
-          if (!matchTermine && !_afficherFeuilleDeMatch) _boutonForcerFeuille(),
-          if (matchTermine || _afficherFeuilleDeMatch) ...[
-            const SizedBox(height: 8),
-            _sectionFeuilleDeMatch(eq1, eq2),
-          ],
-          const SizedBox(height: 20),
-          _sectionInfosBrutes(),
-        ]),
-      ),
-    );
+  return Scaffold(
+  backgroundColor: const Color(0xFFF5F5F0),
+  appBar: AppBar(
+  backgroundColor: _catColor, foregroundColor: Colors.white, elevation: 0,
+  leading: IconButton(icon: const Icon(Icons.arrow_back), onPressed: () => Navigator.pop(context)),
+  title: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+  Row(children: [
+  if (_estConsolante) ...[
+  Container(
+  padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 2),
+  margin: const EdgeInsets.only(right: 8),
+  decoration: BoxDecoration(
+  color: Colors.white.withOpacity(0.2),
+  borderRadius: BorderRadius.circular(4),
+  ),
+  child: const Text('CONSOLANTE', style: TextStyle(fontSize: 9, fontWeight: FontWeight.w800, color: Colors.white)),
+  ),
+  ],
+  Expanded(child: Text('$eq1  vs  $eq2',
+  style: const TextStyle(fontSize: 15, fontWeight: FontWeight.w800, color: Colors.white),
+  overflow: TextOverflow.ellipsis)),
+  ]),
+  Text('$cat · ${matchTermine ? "Terminé" : "En cours"} · $dateLabel',
+  style: const TextStyle(fontSize: 11, color: Colors.white70)),
+  ]),
+  ),
+  body: !_joueursCharges
+  ? const Center(child: CircularProgressIndicator())
+      : SingleChildScrollView(
+  padding: const EdgeInsets.fromLTRB(24, 20, 24, 40),
+  child: Column(crossAxisAlignment: CrossAxisAlignment.stretch, children: [
+  _bandeauSuspendus(),
+  const SizedBox(height: 16),
+  _sectionScore(),
+  const SizedBox(height: 20),
+  if (!matchTermine) ...[
+  _sectionFinDeMatch(),
+  const SizedBox(height: 20),
+  _sectionActions(),
+  const SizedBox(height: 20),
+  _sectionModifDirecte(),
+  const SizedBox(height: 20),
+  ],
+  if (!matchTermine && !_afficherFeuilleDeMatch) _boutonForcerFeuille(),
+  if (matchTermine || _afficherFeuilleDeMatch) ...[
+  const SizedBox(height: 8),
+  _sectionFeuilleDeMatch(eq1, eq2),
+  ],
+  const SizedBox(height: 20),
+  _sectionInfosBrutes(),
+  ]),
+  ),
+  );
   }
 
-  // ── BANDEAU SUSPENDUS ──────────────────────────────────────────────────────
+  // ── Les méthodes de build sont identiques à la version précédente ──────────
   Widget _bandeauSuspendus() {
-    final suspendus = [
-      ..._joueursEquipe1.where((j) => j['suspendu_un_match'] == true || j['suspendu_definitif'] == true),
-      ..._joueursEquipe2.where((j) => j['suspendu_un_match'] == true || j['suspendu_definitif'] == true),
-    ];
-    if (suspendus.isEmpty) return const SizedBox.shrink();
-    return Container(
-      padding: const EdgeInsets.all(14),
-      decoration: BoxDecoration(
-        color: const Color(0xFFFFEBEE),
-        borderRadius: BorderRadius.circular(12),
-        border: Border.all(color: const Color(0xFFE53E3E), width: 1.5),
-      ),
-      child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
-        const Row(children: [
-          Icon(Icons.warning_amber_rounded, color: Color(0xFFE53E3E), size: 18),
-          SizedBox(width: 6),
-          Text('JOUEURS SUSPENDUS', style: TextStyle(fontSize: 12, fontWeight: FontWeight.bold, color: Color(0xFFE53E3E), letterSpacing: 1)),
-        ]),
-        const SizedBox(height: 10),
-        Wrap(spacing: 16, runSpacing: 8, children: suspendus.map((j) {
-          final nom       = '${j["prenom"] ?? ""} ${j["nom"] ?? ""}'.trim();
-          final definitif = j['suspendu_definitif'] == true;
-          final couleur   = definitif ? const Color(0xFF1A4A7A) : const Color(0xFFE53E3E);
-          return Row(mainAxisSize: MainAxisSize.min, children: [
-            Container(width: 28, height: 28, decoration: BoxDecoration(color: couleur, shape: BoxShape.circle),
-                alignment: Alignment.center,
-                child: Text(nom.isNotEmpty ? nom[0].toUpperCase() : '?',
-                    style: const TextStyle(color: Colors.white, fontWeight: FontWeight.bold))),
-            const SizedBox(width: 6),
-            Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
-              Text(nom, style: TextStyle(fontSize: 12, color: couleur, fontWeight: FontWeight.w600)),
-              Text(definitif ? 'Suspendu définitivement' : 'Suspendu 1 match',
-                  style: TextStyle(fontSize: 10, color: couleur)),
-            ]),
-          ]);
-        }).toList()),
-      ]),
-    );
+  final suspendus = [
+  ..._joueursEquipe1.where((j) => j['suspendu_un_match'] == true || j['suspendu_definitif'] == true),
+  ..._joueursEquipe2.where((j) => j['suspendu_un_match'] == true || j['suspendu_definitif'] == true),
+  ];
+  if (suspendus.isEmpty) return const SizedBox.shrink();
+  return Container(
+  padding: const EdgeInsets.all(14),
+  decoration: BoxDecoration(
+  color: const Color(0xFFFFEBEE),
+  borderRadius: BorderRadius.circular(12),
+  border: Border.all(color: const Color(0xFFE53E3E), width: 1.5),
+  ),
+  child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+  const Row(children: [
+  Icon(Icons.warning_amber_rounded, color: Color(0xFFE53E3E), size: 18),
+  SizedBox(width: 6),
+  Text('JOUEURS SUSPENDUS', style: TextStyle(fontSize: 12, fontWeight: FontWeight.bold, color: Color(0xFFE53E3E), letterSpacing: 1)),
+  ]),
+  const SizedBox(height: 10),
+  Wrap(spacing: 16, runSpacing: 8, children: suspendus.map((j) {
+  final nom       = '${j["prenom"] ?? ""} ${j["nom"] ?? ""}'.trim();
+  final definitif = j['suspendu_definitif'] == true;
+  final couleur   = definitif ? const Color(0xFF1A4A7A) : const Color(0xFFE53E3E);
+  return Row(mainAxisSize: MainAxisSize.min, children: [
+  Container(width: 28, height: 28, decoration: BoxDecoration(color: couleur, shape: BoxShape.circle),
+  alignment: Alignment.center,
+  child: Text(nom.isNotEmpty ? nom[0].toUpperCase() : '?',
+  style: const TextStyle(color: Colors.white, fontWeight: FontWeight.bold))),
+  const SizedBox(width: 6),
+  Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+  Text(nom, style: TextStyle(fontSize: 12, color: couleur, fontWeight: FontWeight.w600)),
+  Text(definitif ? 'Suspendu définitivement' : 'Suspendu 1 match',
+  style: TextStyle(fontSize: 10, color: couleur)),
+  ]),
+  ]);
+  }).toList()),
+  ]),
+  );
   }
 
-  // ── SCORE ──────────────────────────────────────────────────────────────────
   Widget _sectionScore() {
-    final s1 = _dataMatch['Score1'] ?? '0';
-    final s2 = _dataMatch['Score2'] ?? '0';
-    final matchTermine = widget.match['Gagnant'] != null && widget.match['Gagnant'] != '0';
-    return Container(
-      decoration: BoxDecoration(color: Colors.white, borderRadius: BorderRadius.circular(16),
-          boxShadow: [BoxShadow(color: _catColor.withOpacity(0.08), blurRadius: 12, offset: const Offset(0,3))]),
-      child: Column(children: [
-        Container(
-          padding: const EdgeInsets.symmetric(horizontal: 20, vertical: 12),
-          decoration: BoxDecoration(color: _catColor, borderRadius: const BorderRadius.vertical(top: Radius.circular(16))),
-          child: Center(child: Text(matchTermine ? 'MATCH TERMINÉ' : 'EN COURS',
-              style: const TextStyle(color: Colors.white, fontWeight: FontWeight.w800, fontSize: 13, letterSpacing: 1))),
-        ),
-        Padding(
-          padding: const EdgeInsets.symmetric(vertical: 20, horizontal: 24),
-          child: Row(children: [
-            Expanded(child: Column(children: [
-              Text(widget.match['Equipe1']?.toString() ?? '?',
-                  style: const TextStyle(fontSize: 13, fontWeight: FontWeight.w700),
-                  textAlign: TextAlign.center, overflow: TextOverflow.ellipsis),
-              const SizedBox(height: 8),
-              Text(s1, style: TextStyle(fontSize: 52, fontWeight: FontWeight.w900, color: _catColor), textAlign: TextAlign.center),
-              Text('${_dataMatch["NbEssai1"] ?? "0"} essai(s)', style: TextStyle(fontSize: 11, color: Colors.grey.shade500)),
-            ])),
-            Padding(padding: const EdgeInsets.symmetric(horizontal: 12),
-                child: Text('–', style: TextStyle(fontSize: 36, color: Colors.grey.shade300, fontWeight: FontWeight.w300))),
-            Expanded(child: Column(children: [
-              Text(widget.match['Equipe2']?.toString() ?? '?',
-                  style: const TextStyle(fontSize: 13, fontWeight: FontWeight.w700),
-                  textAlign: TextAlign.center, overflow: TextOverflow.ellipsis),
-              const SizedBox(height: 8),
-              Text(s2, style: TextStyle(fontSize: 52, fontWeight: FontWeight.w900, color: _catColor), textAlign: TextAlign.center),
-              Text('${_dataMatch["NbEssai2"] ?? "0"} essai(s)', style: TextStyle(fontSize: 11, color: Colors.grey.shade500)),
-            ])),
-          ]),
-        ),
-      ]),
-    );
+  final s1 = _dataMatch['Score1'] ?? '0';
+  final s2 = _dataMatch['Score2'] ?? '0';
+  final matchTermine = widget.match['Gagnant'] != null && widget.match['Gagnant'] != '0';
+  return Container(
+  decoration: BoxDecoration(color: Colors.white, borderRadius: BorderRadius.circular(16),
+  boxShadow: [BoxShadow(color: _catColor.withOpacity(0.08), blurRadius: 12, offset: const Offset(0,3))]),
+  child: Column(children: [
+  Container(
+  padding: const EdgeInsets.symmetric(horizontal: 20, vertical: 12),
+  decoration: BoxDecoration(color: _catColor, borderRadius: const BorderRadius.vertical(top: Radius.circular(16))),
+  child: Center(child: Text(matchTermine ? 'MATCH TERMINÉ' : 'EN COURS',
+  style: const TextStyle(color: Colors.white, fontWeight: FontWeight.w800, fontSize: 13, letterSpacing: 1))),
+  ),
+  Padding(
+  padding: const EdgeInsets.symmetric(vertical: 20, horizontal: 24),
+  child: Row(children: [
+  Expanded(child: Column(children: [
+  Text(widget.match['Equipe1']?.toString() ?? '?',
+  style: const TextStyle(fontSize: 13, fontWeight: FontWeight.w700),
+  textAlign: TextAlign.center, overflow: TextOverflow.ellipsis),
+  const SizedBox(height: 8),
+  Text(s1, style: TextStyle(fontSize: 52, fontWeight: FontWeight.w900, color: _catColor), textAlign: TextAlign.center),
+  Text('${_dataMatch["NbEssai1"] ?? "0"} essai(s)', style: TextStyle(fontSize: 11, color: Colors.grey.shade500)),
+  ])),
+  Padding(padding: const EdgeInsets.symmetric(horizontal: 12),
+  child: Text('–', style: TextStyle(fontSize: 36, color: Colors.grey.shade300, fontWeight: FontWeight.w300))),
+  Expanded(child: Column(children: [
+  Text(widget.match['Equipe2']?.toString() ?? '?',
+  style: const TextStyle(fontSize: 13, fontWeight: FontWeight.w700),
+  textAlign: TextAlign.center, overflow: TextOverflow.ellipsis),
+  const SizedBox(height: 8),
+  Text(s2, style: TextStyle(fontSize: 52, fontWeight: FontWeight.w900, color: _catColor), textAlign: TextAlign.center),
+  Text('${_dataMatch["NbEssai2"] ?? "0"} essai(s)', style: TextStyle(fontSize: 11, color: Colors.grey.shade500)),
+  ])),
+  ]),
+  ),
+  ]),
+  );
   }
 
-  // ── FIN DE MATCH ───────────────────────────────────────────────────────────
   Widget _sectionFinDeMatch() {
-    return _card(
-      titre: 'Fin de match', icon: Icons.sports_score_rounded, couleur: Colors.red.shade700,
-      enfant: _estMatchPoule
-          ? ElevatedButton.icon(
-        icon: const Icon(Icons.flag_rounded), label: const Text('Mettre fin au match'),
-        style: ElevatedButton.styleFrom(backgroundColor: Colors.red.shade700, foregroundColor: Colors.white,
-            minimumSize: const Size(double.infinity, 48), shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(10))),
-        onPressed: () {
-          final s1 = int.tryParse(_dataMatch['Score1'] ?? '0') ?? 0;
-          final s2 = int.tryParse(_dataMatch['Score2'] ?? '0') ?? 0;
-          _gagnant(s1 >= s2 ? widget.match['CodeEquipe1'].toString() : widget.match['CodeEquipe2'].toString());
-        },
-      )
-          : Row(children: [
-        Expanded(child: ElevatedButton(
-          style: ElevatedButton.styleFrom(backgroundColor: _catColor, foregroundColor: Colors.white,
-              minimumSize: const Size.fromHeight(44), shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(10))),
-          onPressed: () => _gagnant(widget.match['CodeEquipe1'].toString()),
-          child: Text(widget.match['Equipe1']?.toString() ?? 'Équipe 1', overflow: TextOverflow.ellipsis),
-        )),
-        const SizedBox(width: 12),
-        Expanded(child: ElevatedButton(
-          style: ElevatedButton.styleFrom(backgroundColor: _catColor, foregroundColor: Colors.white,
-              minimumSize: const Size.fromHeight(44), shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(10))),
-          onPressed: () => _gagnant(widget.match['CodeEquipe2'].toString()),
-          child: Text(widget.match['Equipe2']?.toString() ?? 'Équipe 2', overflow: TextOverflow.ellipsis),
-        )),
-      ]),
-    );
+  return _card(
+  titre: 'Fin de match', icon: Icons.sports_score_rounded, couleur: Colors.red.shade700,
+  enfant: _estMatchPoule
+  ? ElevatedButton.icon(
+  icon: const Icon(Icons.flag_rounded), label: const Text('Mettre fin au match'),
+  style: ElevatedButton.styleFrom(backgroundColor: Colors.red.shade700, foregroundColor: Colors.white,
+  minimumSize: const Size(double.infinity, 48), shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(10))),
+  onPressed: () {
+  final s1 = int.tryParse(_dataMatch['Score1'] ?? '0') ?? 0;
+  final s2 = int.tryParse(_dataMatch['Score2'] ?? '0') ?? 0;
+  _gagnant(s1 >= s2 ? widget.match['CodeEquipe1'].toString() : widget.match['CodeEquipe2'].toString());
+  },
+  )
+      : Row(children: [
+  Expanded(child: ElevatedButton(
+  style: ElevatedButton.styleFrom(backgroundColor: _catColor, foregroundColor: Colors.white,
+  minimumSize: const Size.fromHeight(44), shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(10))),
+  onPressed: () => _gagnant(widget.match['CodeEquipe1'].toString()),
+  child: Text(widget.match['Equipe1']?.toString() ?? 'Équipe 1', overflow: TextOverflow.ellipsis),
+  )),
+  const SizedBox(width: 12),
+  Expanded(child: ElevatedButton(
+  style: ElevatedButton.styleFrom(backgroundColor: _catColor, foregroundColor: Colors.white,
+  minimumSize: const Size.fromHeight(44), shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(10))),
+  onPressed: () => _gagnant(widget.match['CodeEquipe2'].toString()),
+  child: Text(widget.match['Equipe2']?.toString() ?? 'Équipe 2', overflow: TextOverflow.ellipsis),
+  )),
+  ]),
+  );
   }
 
-  // ── ACTIONS ────────────────────────────────────────────────────────────────
   Widget _sectionActions() {
-    return _card(
-      titre: 'Actions pendant le match', icon: Icons.sports_rugby, couleur: _catColor,
-      enfant: Row(crossAxisAlignment: CrossAxisAlignment.start, children: [
-        Expanded(child: _colonneActions(widget.match['Equipe1']?.toString() ?? 'Éq. 1', 1)),
-        const SizedBox(width: 16),
-        Expanded(child: _colonneActions(widget.match['Equipe2']?.toString() ?? 'Éq. 2', 2)),
-      ]),
-    );
+  return _card(
+  titre: 'Actions pendant le match', icon: Icons.sports_rugby, couleur: _catColor,
+  enfant: Row(crossAxisAlignment: CrossAxisAlignment.start, children: [
+  Expanded(child: _colonneActions(widget.match['Equipe1']?.toString() ?? 'Éq. 1', 1)),
+  const SizedBox(width: 16),
+  Expanded(child: _colonneActions(widget.match['Equipe2']?.toString() ?? 'Éq. 2', 2)),
+  ]),
+  );
   }
 
   Widget _colonneActions(String nomEquipe, int equipe) {
-    const actions = [
-      (1, 'Essai (+5)',          Color(0xFF2D9148)),
-      (2, 'Transformation (+2)', Color(0xFF5B8FCC)),
-      (7, 'Pénalité (+3)',       Color(0xFF5B8FCC)),
-      (3, 'Carton Jaune',        Color(0xFFD4A017)),
-      (4, 'Carton Rouge',        Color(0xFFE53E3E)),
-      (5, 'Carton Bleu',         Color(0xFF1A4A7A)),
-      (6, 'Forfait',             Color(0xFF888888)),
-    ];
-    return Column(crossAxisAlignment: CrossAxisAlignment.stretch, children: [
-      Container(padding: const EdgeInsets.symmetric(vertical: 8),
-          decoration: BoxDecoration(color: _catColor.withOpacity(0.08), borderRadius: BorderRadius.circular(8)),
-          child: Text(nomEquipe, textAlign: TextAlign.center,
-              style: TextStyle(fontWeight: FontWeight.w700, fontSize: 12, color: _catColor), overflow: TextOverflow.ellipsis)),
-      const SizedBox(height: 8),
-      ...actions.map((a) => Padding(
-        padding: const EdgeInsets.only(bottom: 6),
-        child: ElevatedButton(
-          style: ElevatedButton.styleFrom(backgroundColor: a.$3, foregroundColor: Colors.white,
-              minimumSize: const Size.fromHeight(36), padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 8),
-              shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(8))),
-          onPressed: () => _faireAction(equipe, a.$1),
-          child: Text(a.$2, style: const TextStyle(fontSize: 11, fontWeight: FontWeight.w600), textAlign: TextAlign.center),
-        ),
-      )),
-    ]);
+  const actions = [
+  (1, 'Essai (+5)',          Color(0xFF2D9148)),
+  (2, 'Transformation (+2)', Color(0xFF5B8FCC)),
+  (7, 'Pénalité (+3)',       Color(0xFF5B8FCC)),
+  (3, 'Carton Jaune',        Color(0xFFD4A017)),
+  (4, 'Carton Rouge',        Color(0xFFE53E3E)),
+  (5, 'Carton Bleu',         Color(0xFF1A4A7A)),
+  (6, 'Forfait',             Color(0xFF888888)),
+  ];
+  return Column(crossAxisAlignment: CrossAxisAlignment.stretch, children: [
+  Container(padding: const EdgeInsets.symmetric(vertical: 8),
+  decoration: BoxDecoration(color: _catColor.withOpacity(0.08), borderRadius: BorderRadius.circular(8)),
+  child: Text(nomEquipe, textAlign: TextAlign.center,
+  style: TextStyle(fontWeight: FontWeight.w700, fontSize: 12, color: _catColor), overflow: TextOverflow.ellipsis)),
+  const SizedBox(height: 8),
+  ...actions.map((a) => Padding(
+  padding: const EdgeInsets.only(bottom: 6),
+  child: ElevatedButton(
+  style: ElevatedButton.styleFrom(backgroundColor: a.$3, foregroundColor: Colors.white,
+  minimumSize: const Size.fromHeight(36), padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 8),
+  shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(8))),
+  onPressed: () => _faireAction(equipe, a.$1),
+  child: Text(a.$2, style: const TextStyle(fontSize: 11, fontWeight: FontWeight.w600), textAlign: TextAlign.center),
+  ),
+  )),
+  ]);
   }
 
-  // ── MODIFICATION DIRECTE ───────────────────────────────────────────────────
   Widget _sectionModifDirecte() {
-    return _card(
-      titre: 'Modifier directement les informations', icon: Icons.edit_rounded, couleur: Colors.grey.shade700,
-      enfant: Column(children: [
-        Row(crossAxisAlignment: CrossAxisAlignment.start, children: [
-          Expanded(child: _colonneModif(widget.match['Equipe1']?.toString() ?? 'Éq. 1', [
-            ('Score', 'Score1'), ('Nb Essais', 'NbEssai1'),
-            ('C. Jaune', 'CartonJaune1'), ('C. Rouge', 'CartonRouge1'), ('C. Bleu', 'CartonBleu1'),
-          ])),
-          const SizedBox(width: 16),
-          Expanded(child: _colonneModif(widget.match['Equipe2']?.toString() ?? 'Éq. 2', [
-            ('Score', 'Score2'), ('Nb Essais', 'NbEssai2'),
-            ('C. Jaune', 'CartonJaune2'), ('C. Rouge', 'CartonRouge2'), ('C. Bleu', 'CartonBleu2'),
-          ])),
-        ]),
-        const SizedBox(height: 14),
-        ElevatedButton.icon(
-          icon: const Icon(Icons.save_rounded, size: 16), label: const Text('Enregistrer les modifications'),
-          style: ElevatedButton.styleFrom(backgroundColor: _catColor, foregroundColor: Colors.white,
-              minimumSize: const Size(double.infinity, 44), shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(10))),
-          onPressed: _modifInformations,
-        ),
-      ]),
-    );
+  return _card(
+  titre: 'Modifier directement les informations', icon: Icons.edit_rounded, couleur: Colors.grey.shade700,
+  enfant: Column(children: [
+  Row(crossAxisAlignment: CrossAxisAlignment.start, children: [
+  Expanded(child: _colonneModif(widget.match['Equipe1']?.toString() ?? 'Éq. 1', [
+  ('Score', 'Score1'), ('Nb Essais', 'NbEssai1'),
+  ('C. Jaune', 'CartonJaune1'), ('C. Rouge', 'CartonRouge1'), ('C. Bleu', 'CartonBleu1'),
+  ])),
+  const SizedBox(width: 16),
+  Expanded(child: _colonneModif(widget.match['Equipe2']?.toString() ?? 'Éq. 2', [
+  ('Score', 'Score2'), ('Nb Essais', 'NbEssai2'),
+  ('C. Jaune', 'CartonJaune2'), ('C. Rouge', 'CartonRouge2'), ('C. Bleu', 'CartonBleu2'),
+  ])),
+  ]),
+  const SizedBox(height: 14),
+  ElevatedButton.icon(
+  icon: const Icon(Icons.save_rounded, size: 16), label: const Text('Enregistrer les modifications'),
+  style: ElevatedButton.styleFrom(backgroundColor: _catColor, foregroundColor: Colors.white,
+  minimumSize: const Size(double.infinity, 44), shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(10))),
+  onPressed: _modifInformations,
+  ),
+  ]),
+  );
   }
 
   Widget _colonneModif(String nom, List<(String, String)> champs) {
-    return Column(crossAxisAlignment: CrossAxisAlignment.stretch, children: [
-      Text(nom, textAlign: TextAlign.center, style: TextStyle(fontSize: 12, fontWeight: FontWeight.w700, color: _catColor), overflow: TextOverflow.ellipsis),
-      const SizedBox(height: 8),
-      ...champs.map((c) => Padding(
-        padding: const EdgeInsets.only(bottom: 8),
-        child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
-          Text(c.$1, style: const TextStyle(fontSize: 10, color: Colors.grey, fontWeight: FontWeight.w600)),
-          const SizedBox(height: 3),
-          TextField(
-            decoration: InputDecoration(hintText: _dataMatch[c.$2]?.toString() ?? '0', isDense: true,
-                contentPadding: const EdgeInsets.symmetric(horizontal: 10, vertical: 8),
-                border: OutlineInputBorder(borderRadius: BorderRadius.circular(8))),
-            style: const TextStyle(fontSize: 13),
-            keyboardType: TextInputType.number,
-            onChanged: (v) => setState(() => _dataMatch[c.$2] = v),
-          ),
-        ]),
-      )),
-    ]);
+  return Column(crossAxisAlignment: CrossAxisAlignment.stretch, children: [
+  Text(nom, textAlign: TextAlign.center, style: TextStyle(fontSize: 12, fontWeight: FontWeight.w700, color: _catColor), overflow: TextOverflow.ellipsis),
+  const SizedBox(height: 8),
+  ...champs.map((c) => Padding(
+  padding: const EdgeInsets.only(bottom: 8),
+  child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+  Text(c.$1, style: const TextStyle(fontSize: 10, color: Colors.grey, fontWeight: FontWeight.w600)),
+  const SizedBox(height: 3),
+  TextField(
+  decoration: InputDecoration(hintText: _dataMatch[c.$2]?.toString() ?? '0', isDense: true,
+  contentPadding: const EdgeInsets.symmetric(horizontal: 10, vertical: 8),
+  border: OutlineInputBorder(borderRadius: BorderRadius.circular(8))),
+  style: const TextStyle(fontSize: 13),
+  keyboardType: TextInputType.number,
+  onChanged: (v) => setState(() => _dataMatch[c.$2] = v),
+  ),
+  ]),
+  )),
+  ]);
   }
 
-  // ── BOUTON FORCER FEUILLE ──────────────────────────────────────────────────
   Widget _boutonForcerFeuille() => OutlinedButton.icon(
-    icon: const Icon(Icons.description_outlined),
-    label: const Text('Générer la feuille de match maintenant'),
-    style: OutlinedButton.styleFrom(minimumSize: const Size(double.infinity, 44),
-        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(10))),
-    onPressed: () => setState(() => _afficherFeuilleDeMatch = true),
+  icon: const Icon(Icons.description_outlined),
+  label: const Text('Générer la feuille de match maintenant'),
+  style: OutlinedButton.styleFrom(minimumSize: const Size(double.infinity, 44),
+  shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(10))),
+  onPressed: () => setState(() => _afficherFeuilleDeMatch = true),
   );
 
-  // ── FEUILLE DE MATCH ───────────────────────────────────────────────────────
   Widget _sectionFeuilleDeMatch(String eq1, String eq2) {
-    return _card(
-      titre: 'Feuille de match', icon: Icons.picture_as_pdf_rounded, couleur: const Color(0xFF2E8B3A),
-      enfant: Column(crossAxisAlignment: CrossAxisAlignment.stretch, children: [
-        _champCommentaire(controller: _ctrlExclusions, label: 'COMPORTEMENTS & EXCLUSIONS', hint: 'Décrivez les incidents disciplinaires...'),
-        const SizedBox(height: 10),
-        _champCommentaire(controller: _ctrlBlessures, label: 'SORTIES SUR BLESSURE', hint: 'Décrivez les sorties sur blessure...'),
-        const SizedBox(height: 10),
-        _champCommentaire(controller: _ctrlObservationRespo, label: 'OBSERVATION RESPO DE TERRAIN', hint: 'Observations...', couleur: const Color(0xFFF5841F)),
-        const SizedBox(height: 10),
-        _champCommentaire(controller: _ctrlReclamation1, label: 'RÉCLAMATION — $eq1', hint: 'Réclamation éventuelle...', couleur: const Color(0xFF1565C0)),
-        const SizedBox(height: 10),
-        _champCommentaire(controller: _ctrlReclamation2, label: 'RÉCLAMATION — $eq2', hint: 'Réclamation éventuelle...', couleur: const Color(0xFF1565C0)),
-        const SizedBox(height: 16),
-        const Text('Signatures de fin de match', style: TextStyle(fontSize: 15, fontWeight: FontWeight.w700), textAlign: TextAlign.center),
-        const SizedBox(height: 10),
-        _champNomArbitre(),
-        const SizedBox(height: 10),
-        _zoneSignature('Signature Arbitre', _signatureArbitre),
-        _zoneSignature('Signature Capitaine — $eq1', _signatureCapitaine1),
-        _zoneSignature('Signature Capitaine — $eq2', _signatureCapitaine2),
-        const SizedBox(height: 16),
-        ElevatedButton.icon(
-          icon: _generationEnCours
-              ? const SizedBox(width: 16, height: 16, child: CircularProgressIndicator(strokeWidth: 2, color: Colors.white))
-              : const Icon(Icons.picture_as_pdf_rounded),
-          label: Text(_generationEnCours ? 'Génération en cours...' : 'Générer la feuille de match'),
-          style: ElevatedButton.styleFrom(
-            backgroundColor: _generationEnCours ? Colors.grey : const Color(0xFF2E8B3A),
-            foregroundColor: Colors.white, minimumSize: const Size(double.infinity, 50),
-            shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
-          ),
-          onPressed: _generationEnCours ? null : _genererFeuilleDeMatch,
-        ),
-      ]),
-    );
+  return _card(
+  titre: 'Feuille de match', icon: Icons.picture_as_pdf_rounded, couleur: const Color(0xFF2E8B3A),
+  enfant: Column(crossAxisAlignment: CrossAxisAlignment.stretch, children: [
+  _champCommentaire(controller: _ctrlExclusions, label: 'COMPORTEMENTS & EXCLUSIONS', hint: 'Décrivez les incidents disciplinaires...'),
+  const SizedBox(height: 10),
+  _champCommentaire(controller: _ctrlBlessures, label: 'SORTIES SUR BLESSURE', hint: 'Décrivez les sorties sur blessure...'),
+  const SizedBox(height: 10),
+  _champCommentaire(controller: _ctrlObservationRespo, label: 'OBSERVATION RESPO DE TERRAIN', hint: 'Observations...', couleur: const Color(0xFFF5841F)),
+  const SizedBox(height: 10),
+  _champCommentaire(controller: _ctrlReclamation1, label: 'RÉCLAMATION — $eq1', hint: 'Réclamation éventuelle...', couleur: const Color(0xFF1565C0)),
+  const SizedBox(height: 10),
+  _champCommentaire(controller: _ctrlReclamation2, label: 'RÉCLAMATION — $eq2', hint: 'Réclamation éventuelle...', couleur: const Color(0xFF1565C0)),
+  const SizedBox(height: 16),
+  const Text('Signatures de fin de match', style: TextStyle(fontSize: 15, fontWeight: FontWeight.w700), textAlign: TextAlign.center),
+  const SizedBox(height: 10),
+  _champNomArbitre(),
+  const SizedBox(height: 10),
+  _zoneSignature('Signature Arbitre', _signatureArbitre),
+  _zoneSignature('Signature Capitaine — $eq1', _signatureCapitaine1),
+  _zoneSignature('Signature Capitaine — $eq2', _signatureCapitaine2),
+  const SizedBox(height: 16),
+  ElevatedButton.icon(
+  icon: _generationEnCours
+  ? const SizedBox(width: 16, height: 16, child: CircularProgressIndicator(strokeWidth: 2, color: Colors.white))
+      : const Icon(Icons.picture_as_pdf_rounded),
+  label: Text(_generationEnCours ? 'Génération en cours...' : 'Générer la feuille de match'),
+  style: ElevatedButton.styleFrom(
+  backgroundColor: _generationEnCours ? Colors.grey : const Color(0xFF2E8B3A),
+  foregroundColor: Colors.white, minimumSize: const Size(double.infinity, 50),
+  shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
+  ),
+  onPressed: _generationEnCours ? null : _genererFeuilleDeMatch,
+  ),
+  ]),
+  );
   }
 
-  // ── INFOS BRUTES ───────────────────────────────────────────────────────────
   Widget _sectionInfosBrutes() {
-    return _card(
-      titre: 'Informations du match', icon: Icons.info_outline_rounded, couleur: Colors.grey.shade600,
-      enfant: Column(children: widget.match.entries.where((e) => !['cat','tableType'].contains(e.key)).map((e) =>
-          Container(
-            margin: const EdgeInsets.only(bottom: 6),
-            padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
-            decoration: BoxDecoration(color: const Color(0xFFF8F8F8), borderRadius: BorderRadius.circular(8),
-                border: Border.all(color: Colors.grey.shade200)),
-            child: Row(mainAxisAlignment: MainAxisAlignment.spaceBetween, children: [
-              Text(e.key, style: TextStyle(fontSize: 12, fontWeight: FontWeight.w600, color: _catColor)),
-              Text(e.value?.toString() ?? '—', style: const TextStyle(fontSize: 12, color: Colors.black54)),
-            ]),
-          )).toList()),
-    );
+  return _card(
+  titre: 'Informations du match', icon: Icons.info_outline_rounded, couleur: Colors.grey.shade600,
+  enfant: Column(children: widget.match.entries.where((e) => !['cat','tableType'].contains(e.key)).map((e) =>
+  Container(
+  margin: const EdgeInsets.only(bottom: 6),
+  padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
+  decoration: BoxDecoration(color: const Color(0xFFF8F8F8), borderRadius: BorderRadius.circular(8),
+  border: Border.all(color: Colors.grey.shade200)),
+  child: Row(mainAxisAlignment: MainAxisAlignment.spaceBetween, children: [
+  Text(e.key, style: TextStyle(fontSize: 12, fontWeight: FontWeight.w600, color: _catColor)),
+  Text(e.value?.toString() ?? '—', style: const TextStyle(fontSize: 12, color: Colors.black54)),
+  ]),
+  )).toList()),
+  );
   }
 
-  // ── WIDGETS HELPERS ────────────────────────────────────────────────────────
   Widget _card({required String titre, required IconData icon, required Color couleur, required Widget enfant}) {
-    return Container(
-      margin: const EdgeInsets.only(bottom: 4),
-      decoration: BoxDecoration(color: Colors.white, borderRadius: BorderRadius.circular(16),
-          boxShadow: [BoxShadow(color: Colors.black.withOpacity(0.04), blurRadius: 8, offset: const Offset(0,2))]),
-      child: Column(crossAxisAlignment: CrossAxisAlignment.stretch, children: [
-        Container(
-          padding: const EdgeInsets.fromLTRB(16, 12, 16, 12),
-          decoration: BoxDecoration(color: couleur.withOpacity(0.07),
-              borderRadius: const BorderRadius.vertical(top: Radius.circular(16)),
-              border: Border(bottom: BorderSide(color: couleur.withOpacity(0.15)))),
-          child: Row(children: [
-            Icon(icon, size: 16, color: couleur), const SizedBox(width: 8),
-            Text(titre, style: TextStyle(fontSize: 13, fontWeight: FontWeight.w700, color: couleur)),
-          ]),
-        ),
-        Padding(padding: const EdgeInsets.all(16), child: enfant),
-      ]),
-    );
+  return Container(
+  margin: const EdgeInsets.only(bottom: 4),
+  decoration: BoxDecoration(color: Colors.white, borderRadius: BorderRadius.circular(16),
+  boxShadow: [BoxShadow(color: Colors.black.withOpacity(0.04), blurRadius: 8, offset: const Offset(0,2))]),
+  child: Column(crossAxisAlignment: CrossAxisAlignment.stretch, children: [
+  Container(
+  padding: const EdgeInsets.fromLTRB(16, 12, 16, 12),
+  decoration: BoxDecoration(color: couleur.withOpacity(0.07),
+  borderRadius: const BorderRadius.vertical(top: Radius.circular(16)),
+  border: Border(bottom: BorderSide(color: couleur.withOpacity(0.15)))),
+  child: Row(children: [
+  Icon(icon, size: 16, color: couleur), const SizedBox(width: 8),
+  Text(titre, style: TextStyle(fontSize: 13, fontWeight: FontWeight.w700, color: couleur)),
+  ]),
+  ),
+  Padding(padding: const EdgeInsets.all(16), child: enfant),
+  ]),
+  );
   }
 
   Widget _champCommentaire({required TextEditingController controller, required String label, required String hint, Color? couleur}) {
-    final c = couleur ?? _catColor;
-    return Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
-      Text(label, style: TextStyle(fontSize: 11, fontWeight: FontWeight.bold, color: c, letterSpacing: 1)),
-      const SizedBox(height: 5),
-      TextField(
-        controller: controller, maxLines: 3, minLines: 2,
-        style: const TextStyle(fontSize: 13, color: Color(0xFF222222), height: 1.5),
-        decoration: InputDecoration(hintText: hint, hintStyle: const TextStyle(fontSize: 12, color: Color(0xFFBBBBBB)),
-            filled: true, fillColor: Colors.white, contentPadding: const EdgeInsets.symmetric(horizontal: 14, vertical: 12),
-            enabledBorder: OutlineInputBorder(borderRadius: BorderRadius.circular(8), borderSide: BorderSide(color: c.withOpacity(0.3), width: 1.5)),
-            focusedBorder:  OutlineInputBorder(borderRadius: BorderRadius.circular(8), borderSide: BorderSide(color: c, width: 1.5))),
-      ),
-    ]);
+  final c = couleur ?? _catColor;
+  return Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+  Text(label, style: TextStyle(fontSize: 11, fontWeight: FontWeight.bold, color: c, letterSpacing: 1)),
+  const SizedBox(height: 5),
+  TextField(
+  controller: controller, maxLines: 3, minLines: 2,
+  style: const TextStyle(fontSize: 13, color: Color(0xFF222222), height: 1.5),
+  decoration: InputDecoration(hintText: hint, hintStyle: const TextStyle(fontSize: 12, color: Color(0xFFBBBBBB)),
+  filled: true, fillColor: Colors.white, contentPadding: const EdgeInsets.symmetric(horizontal: 14, vertical: 12),
+  enabledBorder: OutlineInputBorder(borderRadius: BorderRadius.circular(8), borderSide: BorderSide(color: c.withOpacity(0.3), width: 1.5)),
+  focusedBorder:  OutlineInputBorder(borderRadius: BorderRadius.circular(8), borderSide: BorderSide(color: c, width: 1.5))),
+  ),
+  ]);
   }
 
   Widget _champNomArbitre() {
-    return Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
-      Text("NOM DE L'ARBITRE", style: TextStyle(fontSize: 11, fontWeight: FontWeight.bold, color: _catColor, letterSpacing: 1)),
-      const SizedBox(height: 5),
-      TextField(
-        controller: _ctrlNomArbitre,
-        style: const TextStyle(fontSize: 14, color: Color(0xFF222222)),
-        decoration: InputDecoration(hintText: "Prénom Nom de l'arbitre", filled: true, fillColor: Colors.white,
-            contentPadding: const EdgeInsets.symmetric(horizontal: 14, vertical: 12),
-            prefixIcon: Icon(Icons.person_outline, color: _catColor),
-            enabledBorder: OutlineInputBorder(borderRadius: BorderRadius.circular(8), borderSide: BorderSide(color: _catColor.withOpacity(0.3), width: 1.5)),
-            focusedBorder:  OutlineInputBorder(borderRadius: BorderRadius.circular(8), borderSide: BorderSide(color: _catColor, width: 1.5))),
-      ),
-    ]);
+  return Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+  Text("NOM DE L'ARBITRE", style: TextStyle(fontSize: 11, fontWeight: FontWeight.bold, color: _catColor, letterSpacing: 1)),
+  const SizedBox(height: 5),
+  TextField(
+  controller: _ctrlNomArbitre,
+  style: const TextStyle(fontSize: 14, color: Color(0xFF222222)),
+  decoration: InputDecoration(hintText: "Prénom Nom de l'arbitre", filled: true, fillColor: Colors.white,
+  contentPadding: const EdgeInsets.symmetric(horizontal: 14, vertical: 12),
+  prefixIcon: Icon(Icons.person_outline, color: _catColor),
+  enabledBorder: OutlineInputBorder(borderRadius: BorderRadius.circular(8), borderSide: BorderSide(color: _catColor.withOpacity(0.3), width: 1.5)),
+  focusedBorder:  OutlineInputBorder(borderRadius: BorderRadius.circular(8), borderSide: BorderSide(color: _catColor, width: 1.5))),
+  ),
+  ]);
   }
 
   Widget _zoneSignature(String titre, SignatureController controller) {
-    return Container(
-      margin: const EdgeInsets.only(bottom: 12),
-      decoration: BoxDecoration(color: Colors.white, borderRadius: BorderRadius.circular(10),
-          border: Border.all(color: _catColor, width: 1.5)),
-      child: Column(children: [
-        Container(
-          padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 10),
-          decoration: BoxDecoration(color: _catColor, borderRadius: const BorderRadius.vertical(top: Radius.circular(8))),
-          child: Row(mainAxisAlignment: MainAxisAlignment.spaceBetween, children: [
-            Expanded(child: Text(titre, style: const TextStyle(color: Colors.white, fontSize: 13, fontWeight: FontWeight.bold))),
-            TextButton(
-              onPressed: () => setState(() => controller.clear()),
-              style: TextButton.styleFrom(backgroundColor: Colors.white, padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 4),
-                  minimumSize: Size.zero, shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(5))),
-              child: Text('Effacer', style: TextStyle(color: _catColor, fontSize: 12)),
-            ),
-          ]),
-        ),
-        Container(
-          height: 150,
-          decoration: const BoxDecoration(color: Color(0xFFF5F5F5), borderRadius: BorderRadius.vertical(bottom: Radius.circular(8))),
-          child: Signature(controller: controller, backgroundColor: const Color(0xFFF5F5F5)),
-        ),
-      ]),
-    );
+  return Container(
+  margin: const EdgeInsets.only(bottom: 12),
+  decoration: BoxDecoration(color: Colors.white, borderRadius: BorderRadius.circular(10),
+  border: Border.all(color: _catColor, width: 1.5)),
+  child: Column(children: [
+  Container(
+  padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 10),
+  decoration: BoxDecoration(color: _catColor, borderRadius: const BorderRadius.vertical(top: Radius.circular(8))),
+  child: Row(mainAxisAlignment: MainAxisAlignment.spaceBetween, children: [
+  Expanded(child: Text(titre, style: const TextStyle(color: Colors.white, fontSize: 13, fontWeight: FontWeight.bold))),
+  TextButton(
+  onPressed: () => setState(() => controller.clear()),
+  style: TextButton.styleFrom(backgroundColor: Colors.white, padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 4),
+  minimumSize: Size.zero, shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(5))),
+  child: Text('Effacer', style: TextStyle(color: _catColor, fontSize: 12)),
+  ),
+  ]),
+  ),
+  Container(
+  height: 150,
+  decoration: const BoxDecoration(color: Color(0xFFF5F5F5), borderRadius: BorderRadius.vertical(bottom: Radius.circular(8))),
+  child: Signature(controller: controller, backgroundColor: const Color(0xFFF5F5F5)),
+  ),
+  ]),
+  );
   }
 }
