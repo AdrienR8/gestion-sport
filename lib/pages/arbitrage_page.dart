@@ -3,18 +3,20 @@ import 'package:supabase_flutter/supabase_flutter.dart';
 import 'arbitrage_match_page.dart';
 
 // ─── Constantes ───────────────────────────────────────────────────────────────
-const _categories = ['R15M', 'R7M', 'R7F'];
+const _categories = ['R15M', 'R7M', 'R7F','RF'];
 
 const Map<String, Color> _catColors = {
   'R15M': Color(0xFF1A5C2A),
   'R7M':  Color(0xFF8B4513),
   'R7F':  Color(0xFF6B1A5C),
+  'RF':   Color(0xFF0D5F73),
 };
 
 const Map<String, Color> _catFond = {
   'R15M': Color(0xFFE8F5EC),
   'R7M':  Color(0xFFF5EDE8),
   'R7F':  Color(0xFFF5E8F5),
+  'RF':   Color(0xFFE6F4F7),
 };
 
 const Map<String, String> _phases = {
@@ -65,32 +67,32 @@ class _ArbitragePageState extends State<ArbitragePage>
     try {
       for (final cat in _categories) {
         // Poules
-        final pouleRows = await _supabase
-            .from('Poule$cat')
-            .select()
-            .order('Poule', ascending: true)
-            .order('id', ascending: true);
-        _matchsPoule[cat] = (pouleRows as List)
-            .map((r) => {
-          ...Map<String, dynamic>.from(r),
-          'cat': cat,
-          'tableType': 'poule',
-        })
-            .toList();
+        try {
+          final pouleRows = await _supabase
+              .from('Poule$cat')
+              .select()
+              .order('Poule', ascending: true)
+              .order('id', ascending: true);
+          _matchsPoule[cat] = (pouleRows as List)
+              .map((r) => {...Map<String, dynamic>.from(r), 'cat': cat, 'tableType': 'poule'})
+              .toList();
+        } catch (_) {
+          _matchsPoule[cat] = [];
+        }
 
         // Arbre / phase finale
-        final arbreRows = await _supabase
-            .from(cat)
-            .select()
-            .order('Niveau', ascending: true)
-            .order('id', ascending: true);
-        _matchsArbre[cat] = (arbreRows as List)
-            .map((r) => {
-          ...Map<String, dynamic>.from(r),
-          'cat': cat,
-          'tableType': 'arbre',
-        })
-            .toList();
+        try {
+          final arbreRows = await _supabase
+              .from(cat)
+              .select()
+              .order('Niveau', ascending: true)
+              .order('id', ascending: true);
+          _matchsArbre[cat] = (arbreRows as List)
+              .map((r) => {...Map<String, dynamic>.from(r), 'cat': cat, 'tableType': 'arbre'})
+              .toList();
+        } catch (_) {
+          _matchsArbre[cat] = [];
+        }
       }
       setState(() => _chargement = false);
     } catch (e) {

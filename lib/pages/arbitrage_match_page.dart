@@ -61,6 +61,7 @@ class _ArbitrageMatchPageState extends State<ArbitrageMatchPage> {
       case 'R15M': return const Color(0xFF1A5C2A);
       case 'R7M':  return const Color(0xFF8B4513);
       case 'R7F':  return const Color(0xFF6B1A5C);
+      case 'RF':   return const Color(0xFF0D5F73);
       default:     return _vertOvalies;
     }
   }
@@ -605,14 +606,29 @@ class _ArbitrageMatchPageState extends State<ArbitrageMatchPage> {
           .eq('Categorie', widget.match['CodeCategorie'])
           .order('Points');
       equipesPoule = _trieEquipes(equipesPoule);
-      const matrice = [
-        ['CodeEquipe1','Equipe1','1','11','A'], ['CodeEquipe2','Equipe2','1','11','C'],
-        ['CodeEquipe1','Equipe1','0','12','D'], ['CodeEquipe1','Equipe1','0','13','B'],
-        ['CodeEquipe1','Equipe1','0','14','F'], ['CodeEquipe2','Equipe2','1','14','E'],
-        ['CodeEquipe1','Equipe1','0','15','C'], ['CodeEquipe1','Equipe1','0','16','E'],
-        ['CodeEquipe2','Equipe2','1','16','D'], ['CodeEquipe1','Equipe1','0','17','A'],
-        ['CodeEquipe1','Equipe1','1','18','B'], ['CodeEquipe2','Equipe2','1','18','F'],
-      ];
+      // APRÈS
+// Matrice spécifique selon le nombre de poules de la catégorie
+      final List<List<String>> matrice;
+      if (widget.match['CodeCategorie'] == 'RF') {
+        // 4 poules A-D → adapter les IDs de matchs d'arbre RF
+        // Format : [CodeEquipeX, EquipeX, rang (0=1er, 1=2e), idMatchArbre, poule]
+        matrice = [
+          ['CodeEquipe1','Equipe1','0','11','A'], ['CodeEquipe2','Equipe2','0','11','C'],
+          ['CodeEquipe1','Equipe1','1','12','B'], ['CodeEquipe2','Equipe2','1','12','D'],
+          ['CodeEquipe1','Equipe1','0','13','B'], ['CodeEquipe2','Equipe2','0','13','D'],
+          ['CodeEquipe1','Equipe1','1','14','A'], ['CodeEquipe2','Equipe2','1','14','C'],
+        ];
+      } else {
+        // Catégories à 6 poules : R15M, R7M, R7F
+        matrice = [
+          ['CodeEquipe1','Equipe1','1','11','A'], ['CodeEquipe2','Equipe2','1','11','C'],
+          ['CodeEquipe1','Equipe1','0','12','D'], ['CodeEquipe1','Equipe1','0','13','B'],
+          ['CodeEquipe1','Equipe1','0','14','F'], ['CodeEquipe2','Equipe2','1','14','E'],
+          ['CodeEquipe1','Equipe1','0','15','C'], ['CodeEquipe1','Equipe1','0','16','E'],
+          ['CodeEquipe2','Equipe2','1','16','D'], ['CodeEquipe1','Equipe1','0','17','A'],
+          ['CodeEquipe1','Equipe1','1','18','B'], ['CodeEquipe2','Equipe2','1','18','F'],
+        ];
+      }
       for (final ligne in matrice) {
         if (widget.match['Poule'] == ligne[4]) {
           await _supabase.from(widget.match['CodeCategorie']).update({ligne[0]: equipesPoule[int.parse(ligne[2])]['id']}).eq('id', ligne[3]);
@@ -623,11 +639,11 @@ class _ArbitrageMatchPageState extends State<ArbitrageMatchPage> {
     }
 
     final matchsCat = await _supabase.from(_tableMatch).select();
-    final catFinie  = (matchsCat as List).every((m) => m['Gagnant'] != '0');
-    if (catFinie) {
+    // APRÈS — RF a 4 poules, pas de règle "meilleurs troisièmes" à 6 poules
+    final catFinie = (matchsCat as List).every((m) => m['Gagnant'] != '0');
+    if (catFinie && widget.match['CodeCategorie'] != 'RF') {
       final et = <dynamic>[];
       for (final p in ['A','B','C','D','E','F']) {
-        // Dans _mt, dans la boucle for
         List eq = await _supabase.from('Equipes').select()
             .eq('Poule', p).eq('Categorie', widget.match['CodeCategorie']).order('Points');
         eq = _trieEquipes(eq);
