@@ -120,7 +120,7 @@ class HomePage extends StatelessWidget {
               ),
               const SizedBox(height: 6),
               Text(
-                'Plateforme de gestion du tournoi Ovalies.',
+                'Plateforme de gestion du tournoi Ovalies',
                 style: TextStyle(
                   fontSize: 14,
                   color: Colors.grey.shade600,
